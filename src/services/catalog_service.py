@@ -16,6 +16,12 @@ class CatalogService:
         if sort and sort not in VALID_SORT_VALUES:
             raise ValueError(f"Invalid sort parameter. Allowed: {', '.join(VALID_SORT_VALUES)}")
 
+        if search is not None:
+            if len(search) < 3:
+                raise ValueError("Search query must be at least 3 characters")
+            if len(search) > 255:
+                raise ValueError("Search query must be at most 255 characters")
+
         b2b_data = b2b_client.get_products(
             limit=limit,
             offset=offset,
