@@ -135,17 +135,78 @@ class TestCatalog:
         assert data["total_count"] == 0
 
     @patch('src.services.catalog_service.b2b_client.get_products')
-    def test_search_parameter_passed_to_b2b(self, mock_get_products, client):
-        """Search parameter is passed to B2B"""
+    def test_search_returns_matching_products(self, mock_get_products, client):
+        """Happy path: search returns matching products"""
         mock_get_products.return_value = MOCK_B2B_PRODUCTS_RESPONSE
 
         response = client.get("/api/v1/products?search=iPhone")
 
         assert response.status_code == 200
+        data = response.json()
+        assert len(data["items"]) >= 1
         mock_get_products.assert_called_once_with(
-            limit=20,
-            offset=0,
-            category=None,
-            search="iPhone",
-            sort=None
+            limit=20, offset=0, category=None, search="iPhone", sort=None
+        )
+
+    def test_short_query_returns_400(self, client):
+        """Query shorter than 3 chars → 400"""
+        response = client.get("/api/v1/products?search=ab")
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["code"] == "INVALID_REQUEST"
+        assert "at least 3 characters" in data["message"]
+
+    def test_long_query_returns_400(self, client):
+        """Query longer than 255 chars → 400"""
+        long_query = "a" * 256
+        response = client.get(f"/api/v1/products?search={long_query}")
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["code"] == "INVALID_REQUEST"
+        assert "at most 255 characters" in data["message"]
+
+    @patch('src.services.catalog_service.b2b_client.get_products')
+    def test_special_chars_do_not_break_query(self, mock_get_products, client):
+        """Special chars (%, _, ') don't break the query"""
+        mock_get_products.return_value = {
+            "items": [],
+            "total_count": 0,
+            "limit": 20,
+            "offset": 0
+        }
+
+        response = client.get("/api/v1/products?search=product'_test%value_with_underscore")
+
+        assert response.status_code == 200
+        mock_get_products.assert_called_once()
+
+    @patch('src.services.catalog_service.b2b_client.get_products')
+    def test_empty_results_returns_200(self, mock_get_products, client):
+        """No matches → 200 with empty list"""
+        mock_get_products.return_value = {
+            "items": [],
+            "total_count": 0,
+            "limit": 20,
+            "offset": 0
+        }
+
+        response = client.get("/api/v1/products?search=nonexistent_product_xyz")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["items"] == []
+        assert data["total_count"] == 0
+
+    @patch('src.services.catalog_service.b2b_client.get_products')
+    def test_search_combined_with_category(self, mock_get_products, client):
+        """Search + category_id work together"""
+        mock_get_products.return_value = MOCK_B2B_PRODUCTS_RESPONSE
+
+        response = client.get("/api/v1/products?search=iPhone&category_id=cat-1")
+
+        assert response.status_code == 200
+        mock_get_products.assert_called_once_with(
+            limit=20, offset=0, category="cat-1", search="iPhone", sort=None
         )
