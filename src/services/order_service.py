@@ -159,6 +159,51 @@ class OrderService:
 
         return {"status": "created", "order": self._format_order(order, order_items)}
 
+    def cancel_order(self, user_id: str, order_id: str) -> dict:
+        order = self.db.query(Order).filter(
+            Order.id == order_id,
+            Order.user_id == user_id
+        ).first()
+
+        if not order:
+            return {"code": "ORDER_NOT_FOUND", "message": "Order not found"}
+
+        if order.status not in ["CREATED", "PAID"]:
+            return {
+                "code": "CANCEL_NOT_ALLOWED",
+                "message": f"Отмена невозможна: заказ в статусе {order.status}",
+                "current_status": order.status
+            }
+
+        items = self.db.query(OrderItem).filter(
+            OrderItem.order_id == order_id
+        ).all()
+
+        unreserve_items = [{"sku_id": item.sku_id, "quantity": item.quantity} for item in items]
+
+        try:
+            import httpx
+            with httpx.Client() as client:
+                response = client.post(
+                    f"{b2b_client.base_url}/api/v1/inventory/unreserve",
+                    json={
+                        "order_id": order_id,
+                        "items": unreserve_items
+                    },
+                    headers=b2b_client.headers,
+                    timeout=10.0
+                )
+                response.raise_for_status()
+        except Exception:
+            order.status = "CANCEL_PENDING"
+            self.db.commit()
+            return {"status": "pending", "order": self._format_order(order, items)}
+
+        order.status = "CANCELLED"
+        self.db.commit()
+
+        return {"status": "cancelled", "order": self._format_order(order, items)}
+
     def get_order(self, user_id: str, order_id: str) -> dict | None:
         order = self.db.query(Order).filter(
             Order.id == order_id,
