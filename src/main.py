@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from src.database import Base, engine
 from src.exceptions import register_exception_handlers
-from src.api import catalog
+from src.api import catalog, product_card
 
 app = FastAPI(title="NeoMarket B2C Service")
 
@@ -10,6 +10,7 @@ Base.metadata.create_all(bind=engine)
 register_exception_handlers(app)
 
 app.include_router(catalog.router)
+app.include_router(product_card.router)
 
 
 @app.get("/")
