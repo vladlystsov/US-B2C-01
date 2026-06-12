@@ -28,8 +28,14 @@ def subscribe(
     except ValueError as e:
         raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": str(e)})
 
+    if result["status"] == "not_found":
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Product not found"})
+
     if result["status"] == "duplicate":
         raise HTTPException(status_code=409, detail={"code": "SUBSCRIPTION_ALREADY_EXISTS", "message": "Subscription already exists"})
+
+    if result["status"] == "b2b_error":
+        raise HTTPException(status_code=502, detail={"code": "BAD_GATEWAY", "message": "B2B service unavailable"})
 
     from fastapi.responses import JSONResponse
     return JSONResponse(status_code=201, content=result)

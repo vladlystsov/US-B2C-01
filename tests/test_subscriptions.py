@@ -1,5 +1,7 @@
 import pytest
 from uuid import uuid4
+from unittest.mock import patch
+import httpx
 
 
 class TestSubscriptions:
@@ -8,11 +10,14 @@ class TestSubscriptions:
         """Happy path: create subscription"""
         product_id = str(uuid4())
 
-        response = client.post(
-            f"/api/v1/favorites/{product_id}/subscribe",
-            json={"notify_on": ["IN_STOCK", "PRICE_DOWN"]},
-            headers={"Authorization": f"Bearer {valid_jwt}"}
-        )
+        with patch('src.services.subscription_service.b2b_client.get_product_by_id') as mock_get:
+            mock_get.return_value = {"id": product_id, "title": "Test Product"}
+
+            response = client.post(
+                f"/api/v1/favorites/{product_id}/subscribe",
+                json={"notify_on": ["IN_STOCK", "PRICE_DOWN"]},
+                headers={"Authorization": f"Bearer {valid_jwt}"}
+            )
 
         assert response.status_code == 201
         data = response.json()
@@ -23,17 +28,20 @@ class TestSubscriptions:
         """Duplicate subscription → 409"""
         product_id = str(uuid4())
 
-        client.post(
-            f"/api/v1/favorites/{product_id}/subscribe",
-            json={"notify_on": ["IN_STOCK"]},
-            headers={"Authorization": f"Bearer {valid_jwt}"}
-        )
+        with patch('src.services.subscription_service.b2b_client.get_product_by_id') as mock_get:
+            mock_get.return_value = {"id": product_id, "title": "Test Product"}
 
-        response = client.post(
-            f"/api/v1/favorites/{product_id}/subscribe",
-            json={"notify_on": ["IN_STOCK"]},
-            headers={"Authorization": f"Bearer {valid_jwt}"}
-        )
+            client.post(
+                f"/api/v1/favorites/{product_id}/subscribe",
+                json={"notify_on": ["IN_STOCK"]},
+                headers={"Authorization": f"Bearer {valid_jwt}"}
+            )
+
+            response = client.post(
+                f"/api/v1/favorites/{product_id}/subscribe",
+                json={"notify_on": ["IN_STOCK"]},
+                headers={"Authorization": f"Bearer {valid_jwt}"}
+            )
 
         assert response.status_code == 409
         assert response.json()["code"] == "SUBSCRIPTION_ALREADY_EXISTS"
@@ -63,15 +71,39 @@ class TestSubscriptions:
 
         assert response.status_code == 400
 
+    def test_subscribe_to_unknown_product_returns_404(self, client, valid_jwt):
+        """Subscribe to unknown product → 404"""
+        product_id = str(uuid4())
+
+        mock_response = httpx.Response(status_code=404)
+        with patch('src.services.subscription_service.b2b_client.get_product_by_id') as mock_get:
+            mock_get.side_effect = httpx.HTTPStatusError(
+                message="Not found",
+                request=httpx.Request("GET", "http://test"),
+                response=mock_response
+            )
+
+            response = client.post(
+                f"/api/v1/favorites/{product_id}/subscribe",
+                json={"notify_on": ["IN_STOCK"]},
+                headers={"Authorization": f"Bearer {valid_jwt}"}
+            )
+
+        assert response.status_code == 404
+        assert response.json()["code"] == "NOT_FOUND"
+
     def test_unsubscribe_returns_204(self, client, valid_jwt):
         """Unsubscribe from product"""
         product_id = str(uuid4())
 
-        client.post(
-            f"/api/v1/favorites/{product_id}/subscribe",
-            json={"notify_on": ["IN_STOCK"]},
-            headers={"Authorization": f"Bearer {valid_jwt}"}
-        )
+        with patch('src.services.subscription_service.b2b_client.get_product_by_id') as mock_get:
+            mock_get.return_value = {"id": product_id, "title": "Test Product"}
+
+            client.post(
+                f"/api/v1/favorites/{product_id}/subscribe",
+                json={"notify_on": ["IN_STOCK"]},
+                headers={"Authorization": f"Bearer {valid_jwt}"}
+            )
 
         response = client.delete(
             f"/api/v1/favorites/{product_id}/subscribe",
