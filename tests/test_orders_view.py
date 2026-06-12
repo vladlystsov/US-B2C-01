@@ -31,6 +31,10 @@ class TestOrdersView:
         """Happy path: list own orders with pagination"""
         token, user_id = valid_jwt_with_fixed_id
 
+        db_session.query(OrderItem).delete()
+        db_session.query(Order).delete()
+        db_session.commit()
+
         for i in range(3):
             order = Order(
                 id=str(uuid4()),
