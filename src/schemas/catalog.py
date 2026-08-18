@@ -1,19 +1,30 @@
+from typing import Any, Optional
+
 from pydantic import BaseModel, Field
-from typing import List, Optional, Any
-from uuid import UUID
 
 
-class ProductShortItem(BaseModel):
+class ImageRef(BaseModel):
     id: str
-    title: str
-    image: Optional[str] = None
-    price: int
-    in_stock: bool = True
-    is_in_cart: bool = False
+    url: str
+    alt: Optional[str] = None
+    ordering: int = 0
+    is_main: Optional[bool] = None
+
+
+class CatalogProductCard(BaseModel):
+    id: str
+    name: str
+    slug: Optional[str] = None
+    min_price: int
+    old_price: Optional[int] = None
+    has_stock: bool
+    rating: Optional[float] = None
+    reviews_count: int = 0
+    images: list[ImageRef] = Field(default_factory=list)
 
 
 class ProductShortListResponse(BaseModel):
-    items: List[ProductShortItem] = []
+    items: list[CatalogProductCard] = Field(default_factory=list)
     total_count: int = 0
     limit: int = 20
     offset: int = 0
@@ -26,9 +37,9 @@ class FacetValue(BaseModel):
 
 class FacetItem(BaseModel):
     name: str
-    values: List[FacetValue]
+    values: list[FacetValue]
 
 
 class FacetsResponse(BaseModel):
     category_id: Optional[str] = None
-    facets: List[FacetItem] = []
+    facets: list[FacetItem] = Field(default_factory=list)

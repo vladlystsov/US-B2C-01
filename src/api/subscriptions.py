@@ -1,52 +1,47 @@
-from fastapi import APIRouter, Depends, HTTPException
-from src.services.subscription_service import SubscriptionService, VALID_NOTIFY_ON
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
 from src.database import get_db
 from src.dependencies.auth import get_current_user_id
-from sqlalchemy.orm import Session
-from pydantic import BaseModel
-from typing import List
+from src.services.subscription_service import SubscriptionService
 
 
 class SubscribeRequest(BaseModel):
-    notify_on: List[str]
+    events: list[str] = Field(default_factory=lambda: ["BACK_IN_STOCK", "PRICE_DROP"])
 
 
 router = APIRouter(prefix="/api/v1/favorites", tags=["Subscriptions"])
 
 
-@router.post("/{product_id}/subscribe")
+@router.post("/{product_id}/subscribe", status_code=204)
 def subscribe(
     product_id: str,
-    request: SubscribeRequest,
+    request: Optional[SubscribeRequest] = None,
     user_id: str = Depends(get_current_user_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    service = SubscriptionService(db)
-
+    events = (request.events if request else ["BACK_IN_STOCK", "PRICE_DROP"])
     try:
-        result = service.subscribe(str(user_id), product_id, request.notify_on)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": str(e)})
-
+        result = SubscriptionService(db).subscribe(str(user_id), product_id, events)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": str(exc)})
     if result["status"] == "not_found":
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Product not found"})
-
     if result["status"] == "duplicate":
         raise HTTPException(status_code=409, detail={"code": "SUBSCRIPTION_ALREADY_EXISTS", "message": "Subscription already exists"})
-
     if result["status"] == "b2b_error":
         raise HTTPException(status_code=502, detail={"code": "BAD_GATEWAY", "message": "B2B service unavailable"})
-
-    from fastapi.responses import JSONResponse
-    return JSONResponse(status_code=201, content=result)
+    return Response(status_code=204)
 
 
 @router.delete("/{product_id}/subscribe", status_code=204)
 def unsubscribe(
     product_id: str,
     user_id: str = Depends(get_current_user_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    service = SubscriptionService(db)
-    service.unsubscribe(str(user_id), product_id)
-    return None
+    SubscriptionService(db).unsubscribe(str(user_id), product_id)
+    return Response(status_code=204)

@@ -1,208 +1,180 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
 from sqlalchemy.orm import Session
+
 from src.models.cart import CartItem
 from src.services.b2b_client import b2b_client
-import uuid
-import httpx
+from src.services.catalog_mapper import cart_product_data
 
 
 class CartService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _get_identity(self, user_id: str = None, session_id: str = None):
+    @staticmethod
+    def _identity(user_id: str | None = None, session_id: str | None = None) -> dict | None:
         if user_id:
             return {"user_id": user_id, "session_id": None}
         if session_id:
             return {"user_id": None, "session_id": session_id}
         return None
 
-    def add_item(self, sku_id: str, quantity: int, user_id: str = None, session_id: str = None) -> dict:
-        identity = self._get_identity(user_id, session_id)
+    def _query_items(self, user_id: str | None = None, session_id: str | None = None):
+        identity = self._identity(user_id, session_id)
         if not identity:
+            return None
+        return self.db.query(CartItem).filter(
+            CartItem.user_id == identity["user_id"], CartItem.session_id == identity["session_id"]
+        )
+
+    def add_item(self, sku_id: str, quantity: int, user_id: str | None = None, session_id: str | None = None) -> dict:
+        query = self._query_items(user_id, session_id)
+        if query is None:
             return {"error": "MISSING_IDENTITY"}
-
-        query = self.db.query(CartItem).filter(
-            CartItem.sku_id == sku_id,
-            CartItem.user_id == identity["user_id"],
-            CartItem.session_id == identity["session_id"]
-        )
-
-        existing = query.first()
-
-        if existing:
-            existing.quantity += quantity
-            existing.updated_at = datetime.utcnow()
-            self.db.commit()
-            return {"status": "updated", "item_id": existing.id, "quantity": existing.quantity}
-
-        item = CartItem(
-            id=str(uuid.uuid4()),
-            user_id=identity["user_id"],
-            session_id=identity["session_id"],
-            sku_id=sku_id,
-            quantity=quantity
-        )
-        self.db.add(item)
+        item = query.filter(CartItem.sku_id == sku_id).first()
+        if item:
+            item.quantity += quantity
+            item.updated_at = datetime.utcnow()
+        else:
+            identity = self._identity(user_id, session_id)
+            item = CartItem(id=str(uuid.uuid4()), sku_id=sku_id, quantity=quantity, **identity)
+            self.db.add(item)
         self.db.commit()
+        return self.get_cart(user_id, session_id)
 
-        return {"status": "created", "item_id": item.id, "quantity": item.quantity}
-
-    def update_item(self, item_id: str, quantity: int, user_id: str = None, session_id: str = None) -> dict:
-        identity = self._get_identity(user_id, session_id)
-        if not identity:
+    def update_item(self, sku_id: str, quantity: int, user_id: str | None = None, session_id: str | None = None) -> dict:
+        query = self._query_items(user_id, session_id)
+        if query is None:
             return {"error": "MISSING_IDENTITY"}
-
-        item = self.db.query(CartItem).filter(
-            CartItem.id == item_id,
-            CartItem.user_id == identity["user_id"],
-            CartItem.session_id == identity["session_id"]
-        ).first()
-
+        item = query.filter(CartItem.sku_id == sku_id).first()
         if not item:
             return {"error": "NOT_FOUND"}
-
         item.quantity = quantity
         item.updated_at = datetime.utcnow()
         self.db.commit()
+        return self.get_cart(user_id, session_id)
 
-        return {"status": "updated", "item_id": item.id, "quantity": item.quantity}
+    def remove_item(self, sku_id: str, user_id: str | None = None, session_id: str | None = None) -> dict:
+        query = self._query_items(user_id, session_id)
+        if query is None:
+            return {"error": "MISSING_IDENTITY"}
+        item = query.filter(CartItem.sku_id == sku_id).first()
+        if not item:
+            return {"error": "NOT_FOUND"}
+        self.db.delete(item)
+        self.db.commit()
+        return self.get_cart(user_id, session_id)
 
-    def remove_item(self, item_id: str, user_id: str = None, session_id: str = None) -> bool:
-        identity = self._get_identity(user_id, session_id)
-        if not identity:
+    def clear_cart(self, user_id: str | None = None, session_id: str | None = None) -> bool:
+        query = self._query_items(user_id, session_id)
+        if query is None:
             return False
-
-        item = self.db.query(CartItem).filter(
-            CartItem.id == item_id,
-            CartItem.user_id == identity["user_id"],
-            CartItem.session_id == identity["session_id"]
-        ).first()
-
-        if item:
-            self.db.delete(item)
-            self.db.commit()
-            return True
-
-        return False
-
-    def clear_cart(self, user_id: str = None, session_id: str = None) -> bool:
-        identity = self._get_identity(user_id, session_id)
-        if not identity:
-            return False
-
-        items = self.db.query(CartItem).filter(
-            CartItem.user_id == identity["user_id"],
-            CartItem.session_id == identity["session_id"]
-        ).all()
-
-        for item in items:
-            self.db.delete(item)
-
+        query.delete(synchronize_session=False)
         self.db.commit()
         return True
 
-    def get_cart(self, user_id: str = None, session_id: str = None) -> dict:
-        identity = self._get_identity(user_id, session_id)
-        if not identity:
-            return {"items": [], "summary": {"total_amount": 0, "total_items": 0, "unavailable_count": 0, "checkout_ready": True}}
+    def _products_by_sku(self, sku_ids: list[str]) -> dict[str, dict]:
+        if not sku_ids:
+            return {}
+        # The B2B public batch endpoint returns an array. Product IDs are normally
+        # available from the cart creation flow; legacy rows fall back to the same
+        # compatibility proxy used by this MVP.
+        try:
+            data = b2b_client.get_products(limit=100, offset=0, ids=sku_ids)
+            products = data.get("items", [])
+        except Exception:
+            products = []
+        mapped: dict[str, dict] = {}
+        for product in products:
+            for sku in product.get("skus", []) or []:
+                if sku.get("id") in sku_ids:
+                    mapped[sku["id"]] = product
 
-        items = self.db.query(CartItem).filter(
-            CartItem.user_id == identity["user_id"],
-            CartItem.session_id == identity["session_id"]
-        ).all()
+        # Legacy cart rows store only sku_id. Resolve missing entries through the
+        # public SKU endpoint, then retrieve their public product by product_id.
+        for sku_id in set(sku_ids) - set(mapped):
+            try:
+                sku = b2b_client.get_public_sku(sku_id)
+                product_id = sku.get("product_id")
+                if not product_id:
+                    continue
+                product = b2b_client.get_product_by_id(product_id)
+                if product:
+                    mapped[sku_id] = product
+            except Exception:
+                continue
+        return mapped
 
-        if not items:
-            return {"items": [], "summary": {"total_amount": 0, "total_items": 0, "unavailable_count": 0, "checkout_ready": True}}
-
-        sku_ids = [item.sku_id for item in items]
+    def get_cart(self, user_id: str | None = None, session_id: str | None = None) -> dict:
+        query = self._query_items(user_id, session_id)
+        if query is None:
+            return {"items": [], "items_count": 0, "subtotal": 0, "is_valid": False}
+        db_items = query.order_by(CartItem.created_at).all()
+        if not db_items:
+            return {"items": [], "items_count": 0, "subtotal": 0, "is_valid": True}
 
         try:
-            b2b_data = b2b_client.get_products(limit=100, offset=0, ids=",".join(sku_ids))
-            b2b_products = {p["id"]: p for p in b2b_data.get("items", [])}
+            by_sku = self._products_by_sku([item.sku_id for item in db_items])
         except Exception:
-            b2b_products = {}
+            by_sku = {}
 
-        enriched_items = []
-        total_amount = 0
-        total_items = 0
-        unavailable_count = 0
-
-        for item in items:
-            product = None
-            sku_data = None
-
-            for pid, pdata in b2b_products.items():
-                for s in pdata.get("skus", []):
-                    if s.get("id") == item.sku_id:
-                        product = pdata
-                        sku_data = s
-                        break
-                if product:
-                    break
-
-            if not product or not sku_data:
-                enriched_items.append({
-                    "id": item.id,
+        response_items = []
+        subtotal = 0
+        all_available = True
+        for item in db_items:
+            product = by_sku.get(item.sku_id)
+            details = cart_product_data(product, item.sku_id) if product else None
+            reason = item.unavailable_reason
+            if not details:
+                reason = reason or "PRODUCT_DELETED"
+                response_items.append({
                     "sku_id": item.sku_id,
+                    "product_id": "",
+                    "name": "Unavailable product",
                     "quantity": item.quantity,
-                    "available": False,
-                    "unavailable_reason": "PRODUCT_DELETED"
+                    "unit_price": 0,
+                    "line_total": 0,
+                    "available_quantity": 0,
+                    "is_available": False,
+                    "unavailable_reason": reason,
+                    "image": None,
                 })
-                unavailable_count += 1
+                all_available = False
                 continue
 
-            active_qty = sku_data.get("active_quantity", 0)
-            available = active_qty >= item.quantity
-
-            enriched_items.append({
-                "id": item.id,
-                "sku_id": item.sku_id,
+            is_available = details["available_quantity"] >= item.quantity and not reason
+            if not is_available:
+                reason = reason or "OUT_OF_STOCK"
+                all_available = False
+            line_total = details["unit_price"] * item.quantity if is_available else 0
+            subtotal += line_total
+            response_items.append({
+                **details,
                 "quantity": item.quantity,
-                "product_id": product.get("id"),
-                "title": product.get("title"),
-                "image": sku_data.get("image"),
-                "price": sku_data.get("price", 0),
-                "available": available,
-                "unavailable_reason": "OUT_OF_STOCK" if not available else None
+                "line_total": line_total,
+                "is_available": is_available,
+                "unavailable_reason": reason,
             })
 
-            if available:
-                total_amount += sku_data.get("price", 0) * item.quantity
-                total_items += item.quantity
-            else:
-                unavailable_count += 1
-
         return {
-            "items": enriched_items,
-            "summary": {
-                "total_amount": total_amount,
-                "total_items": total_items,
-                "unavailable_count": unavailable_count,
-                "checkout_ready": unavailable_count == 0
-            }
+            "items": response_items,
+            "items_count": sum(item.quantity for item in db_items),
+            "subtotal": subtotal,
+            "is_valid": all_available,
         }
 
     def merge_guest_cart(self, user_id: str, session_id: str) -> dict:
-        guest_items = self.db.query(CartItem).filter(
-            CartItem.session_id == session_id,
-            CartItem.user_id == None
-        ).all()
-
+        guest_items = self.db.query(CartItem).filter(CartItem.session_id == session_id, CartItem.user_id.is_(None)).all()
         for guest_item in guest_items:
-            existing = self.db.query(CartItem).filter(
-                CartItem.user_id == user_id,
-                CartItem.sku_id == guest_item.sku_id
-            ).first()
-
+            existing = self.db.query(CartItem).filter(CartItem.user_id == user_id, CartItem.sku_id == guest_item.sku_id).first()
             if existing:
                 existing.quantity = max(existing.quantity, guest_item.quantity)
                 self.db.delete(guest_item)
             else:
                 guest_item.user_id = user_id
                 guest_item.session_id = None
-
         self.db.commit()
-        return {"status": "merged"}
-
-
-from datetime import datetime
+        return self.get_cart(user_id=user_id)

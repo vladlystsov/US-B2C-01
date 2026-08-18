@@ -1,95 +1,84 @@
-from src.services.b2b_client import b2b_client
+from __future__ import annotations
+
 import httpx
+
+from src.services.b2b_client import b2b_client
+
+
+class OrphanCategoryError(ValueError):
+    pass
 
 
 class CategoryService:
-    def get_category_tree(self) -> dict:
-        try:
-            with httpx.Client() as client:
-                response = client.get(
-                    f"{b2b_client.base_url}/api/v1/categories/",
-                    headers=b2b_client.headers,
-                    timeout=10.0
-                )
-                response.raise_for_status()
-                return response.json()
-        except Exception:
-            return {"items": []}
+    def _categories(self) -> list[dict]:
+        return b2b_client.get_categories()
 
-    def get_category_detail(self, category_id: str, include_product_count: bool = False) -> dict | None:
-        try:
-            with httpx.Client() as client:
-                response = client.get(
-                    f"{b2b_client.base_url}/api/v1/categories/{category_id}",
-                    headers=b2b_client.headers,
-                    timeout=10.0
-                )
-                response.raise_for_status()
-                result = response.json()
+    @staticmethod
+    def _normalise(categories: list[dict]) -> tuple[list[dict], dict[str, dict]]:
+        by_id = {str(category["id"]): {**category, "id": str(category["id"])} for category in categories}
+        for category in by_id.values():
+            parent_id = category.get("parent_id")
+            if parent_id is not None and str(parent_id) not in by_id:
+                raise OrphanCategoryError(f"Category {category['id']} refers to missing parent {parent_id}")
 
-                if include_product_count:
-                    b2b_data = b2b_client.get_products(limit=100, offset=0, category=category_id)
-                    result["product_count"] = len(b2b_data.get("items", []))
+        def category_ref(category: dict) -> dict:
+            chain: list[dict] = []
+            current = category
+            seen: set[str] = set()
+            while current:
+                current_id = current["id"]
+                if current_id in seen:
+                    raise OrphanCategoryError(f"Category hierarchy contains a cycle at {current_id}")
+                seen.add(current_id)
+                chain.append(current)
+                parent_id = current.get("parent_id")
+                current = by_id.get(str(parent_id)) if parent_id is not None else None
+            chain.reverse()
+            return {
+                "id": category["id"],
+                "name": category.get("name", ""),
+                "parent_id": str(category["parent_id"]) if category.get("parent_id") is not None else None,
+                "level": len(chain) - 1,
+                "path": [node["id"] for node in chain],
+            }
 
-                return result
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                return None
-            raise
-        except Exception:
-            return None
+        refs = [category_ref(category) for category in by_id.values()]
+        return refs, by_id
 
-    def get_breadcrumbs(self, category_id: str = None, product_id: str = None) -> dict | None:
-        if category_id and product_id:
-            return {"error": "ambiguous_param"}
+    def get_categories(self) -> list[dict]:
+        refs, _ = self._normalise(self._categories())
+        return sorted(refs, key=lambda item: (item["level"], item["name"].lower()))
 
-        if not category_id and not product_id:
-            return {"error": "missing_param"}
+    def get_category_tree(self) -> list[dict]:
+        refs = self.get_categories()
+        nodes = {item["id"]: {**item, "children": []} for item in refs}
+        roots = []
+        for node in nodes.values():
+            if node["parent_id"] is None:
+                roots.append(node)
+            else:
+                nodes[node["parent_id"]]["children"].append(node)
+        for node in nodes.values():
+            node["children"].sort(key=lambda item: item["name"].lower())
+        return sorted(roots, key=lambda item: item["name"].lower())
 
-        resolved_via = "category_id"
-
+    def get_breadcrumbs(self, category_id: str | None = None, product_id: str | None = None) -> list[dict] | dict | None:
+        if bool(category_id) == bool(product_id):
+            return {"error": "ambiguous_param" if category_id else "missing_param"}
         if product_id:
-            resolved_via = "product_id"
             try:
                 product = b2b_client.get_product_by_id(product_id)
             except httpx.HTTPStatusError:
                 return None
-            if not product:
-                return None
-            category_id = product.get("category", {}).get("id")
+            category_id = product.get("category_id") or product.get("category", {}).get("id")
             if not category_id:
-                return {"data": [], "meta": {"resolved_via": "product_id", "product_id": product_id}}
+                return None
 
-        try:
-            with httpx.Client() as client:
-                response = client.get(
-                    f"{b2b_client.base_url}/api/v1/categories/{category_id}",
-                    headers=b2b_client.headers,
-                    timeout=10.0
-                )
-                if response.status_code == 404:
-                    cat_name = "Unknown"
-                else:
-                    cat_data = response.json()
-                    cat_name = cat_data.get("name", "Unknown")
-        except Exception:
-            cat_name = "Unknown"
-
-        items = [
-            {
-                "id": category_id,
-                "slug": None,
-                "name": cat_name,
-                "url": f"/catalog/{category_id}",
-                "level": 0,
-                "is_current": True
-            }
-        ]
-
-        return {
-            "data": items,
-            "meta": {"resolved_via": resolved_via, "category_id": category_id}
-        }
+        for category in self.get_categories():
+            if category["id"] == str(category_id):
+                refs = {item["id"]: item for item in self.get_categories()}
+                return [refs[item_id] for item_id in category["path"]]
+        return None
 
 
 category_service = CategoryService()
