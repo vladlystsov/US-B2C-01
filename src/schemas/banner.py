@@ -1,19 +1,16 @@
+from typing import Optional
+
 from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
 
 
 class BannerItem(BaseModel):
     id: str
-    title: str
     image_url: str
     link: str
-    priority: int
-
-
-class BannerListResponse(BaseModel):
-    items: List[BannerItem] = []
-    total_count: int = 0
+    title: Optional[str] = None
+    ordering: Optional[int] = None
+    active_from: Optional[str] = None
+    active_to: Optional[str] = None
 
 
 class BannerEventRequest(BaseModel):

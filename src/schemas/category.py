@@ -1,36 +1,20 @@
-from pydantic import BaseModel
-from typing import List, Optional, Any
+from __future__ import annotations
+
+from typing import Optional
+
+from pydantic import BaseModel, Field
 
 
 class CategoryItem(BaseModel):
     id: str
     name: str
     parent_id: Optional[str] = None
-    children: List[Any] = []
-
-
-class CategoryTreeResponse(BaseModel):
-    items: List[CategoryItem] = []
-
-
-class CategoryDetailResponse(BaseModel):
-    id: str
-    name: str
-    slug: Optional[str] = None
-    description: Optional[str] = None
-    parent: Optional[dict] = None
-    product_count: Optional[int] = None
-
-
-class BreadcrumbItem(BaseModel):
-    id: str
-    slug: Optional[str] = None
-    name: str
-    url: str
     level: int
-    is_current: bool
+    path: list[str] = Field(default_factory=list)
 
 
-class BreadcrumbsResponse(BaseModel):
-    data: List[BreadcrumbItem] = []
-    meta: Optional[dict] = None
+class CategoryTreeNode(CategoryItem):
+    children: list["CategoryTreeNode"] = Field(default_factory=list)
+
+
+CategoryTreeNode.model_rebuild()

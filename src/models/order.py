@@ -1,5 +1,7 @@
-from sqlalchemy import Column, String, Integer, DateTime, JSON, Text
+from sqlalchemy import Column, DateTime, Integer, String, Text, event, inspect
+from sqlalchemy.orm import Session, object_session
 from sqlalchemy.sql import func
+
 from src.database import Base
 
 
@@ -28,3 +30,26 @@ class OrderItem(Base):
     quantity = Column(Integer, nullable=False)
     unit_price = Column(Integer, nullable=False)
     line_total = Column(Integer, nullable=False)
+
+
+@event.listens_for(Session, "after_flush")
+def schedule_fulfill_on_delivery(session, _flush_context):
+    pending = session.info.setdefault("fulfill_after_commit", set())
+    for instance in session.dirty:
+        if not isinstance(instance, Order) or instance.status != "DELIVERED":
+            continue
+        if inspect(instance).attrs.status.history.has_changes():
+            pending.add(instance.id)
+
+
+@event.listens_for(Session, "after_commit")
+def trigger_fulfill_after_delivery_commit(session):
+    order_ids = session.info.pop("fulfill_after_commit", set())
+    if not order_ids:
+        return
+    bind = session.get_bind()
+    from src.services.fulfill_service import FulfillService
+
+    for order_id in order_ids:
+        with Session(bind=bind) as fulfillment_session:
+            FulfillService(fulfillment_session).trigger_fulfill(order_id)

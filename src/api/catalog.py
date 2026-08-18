@@ -1,49 +1,44 @@
-from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
-from src.schemas.catalog import ProductShortListResponse, FacetsResponse
-from src.services.catalog_service import catalog_service, VALID_SORT_VALUES
 
-router = APIRouter(prefix="/api/v1", tags=["Catalog"])
+from fastapi import APIRouter, HTTPException, Query
+
+from src.schemas.catalog import FacetsResponse, ProductShortListResponse
+from src.services.catalog_service import VALID_SORT_VALUES, catalog_service
+
+router = APIRouter(prefix="/api/v1/catalog", tags=["Catalog"])
 
 
 @router.get("/products", response_model=ProductShortListResponse)
 def get_products(
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    category_id: Optional[str] = None,
-    search: Optional[str] = None,
+    q: Optional[str] = Query(None, max_length=200),
     sort: Optional[str] = None,
+    category_id: Optional[str] = Query(None, alias="filter[category_id]"),
+    price_min: Optional[int] = Query(None, ge=0, alias="filter[price_min]"),
+    price_max: Optional[int] = Query(None, ge=0, alias="filter[price_max]"),
+    seller_id: Optional[str] = Query(None, alias="filter[seller_id]"),
 ):
     try:
-        result = catalog_service.get_products(
+        return catalog_service.get_products(
             limit=limit,
             offset=offset,
             category_id=category_id,
-            search=search,
-            sort=sort
+            q=q,
+            sort=sort,
+            price_min=price_min,
+            price_max=price_max,
+            seller_id=seller_id,
         )
-        return result
-    except ValueError as e:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "INVALID_REQUEST", "message": str(e)}
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail={"code": "BAD_GATEWAY", "message": "B2B service unavailable"}
-        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "INVALID_REQUEST", "message": str(exc)})
+    except Exception:
+        raise HTTPException(status_code=502, detail={"code": "BAD_GATEWAY", "message": "B2B service unavailable"})
 
 
-@router.get("/catalog/facets", response_model=FacetsResponse)
-def get_facets(
-    category_id: Optional[str] = None,
-):
+@router.get("/facets", response_model=FacetsResponse, include_in_schema=False)
+def get_facets(category_id: Optional[str] = None):
     try:
-        result = catalog_service.get_facets(category_id=category_id)
-        return result
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail={"code": "BAD_GATEWAY", "message": "B2B service unavailable"}
-        )
+        return catalog_service.get_facets(category_id=category_id)
+    except Exception:
+        raise HTTPException(status_code=502, detail={"code": "BAD_GATEWAY", "message": "B2B service unavailable"})

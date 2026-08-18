@@ -1,25 +1,22 @@
-from pydantic import BaseModel
-from typing import List, Optional, Any
-from uuid import UUID
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
+
+from src.schemas.catalog import CatalogProductCard, ImageRef
 
 
 class SKUPublicResponse(BaseModel):
     id: str
-    name: str
+    name: Optional[str] = None
+    sku_code: Optional[str] = None
     price: int
-    discount: int = 0
-    image: Optional[str] = None
+    old_price: Optional[int] = None
     available_quantity: int = 0
-    characteristics: List[Any] = []
+    attributes: Any = Field(default_factory=dict)
+    images: list[ImageRef] = Field(default_factory=list)
 
 
-class ProductPublicResponse(BaseModel):
-    id: str
-    name: str
+class ProductPublicResponse(CatalogProductCard):
     description: str
-    slug: Optional[str] = None
-    images: List[Any] = []
-    characteristics: List[Any] = []
-    skus: List[SKUPublicResponse] = []
-    min_price: int = 0
-    has_stock: bool = False
+    attributes: Any = Field(default_factory=dict)
+    skus: list[SKUPublicResponse] = Field(default_factory=list)

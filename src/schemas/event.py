@@ -1,12 +1,18 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional
 from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field
 
 
-class ProductEventRequest(BaseModel):
+class B2BEventRequest(BaseModel):
+    event_type: Literal[
+        "PRODUCT_BLOCKED",
+        "PRODUCT_HARD_BLOCKED",
+        "PRODUCT_DELETED",
+        "SKU_OUT_OF_STOCK",
+        "SKU_BACK_IN_STOCK",
+        "PRICE_CHANGED",
+    ]
     idempotency_key: str
-    event: str
-    product_id: str
-    sku_ids: List[str]
-    reason: Optional[str] = None
-    date: datetime
+    occurred_at: datetime
+    payload: dict[str, Any]

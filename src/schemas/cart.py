@@ -1,5 +1,8 @@
+from typing import Optional
+
 from pydantic import BaseModel, Field
-from typing import List, Optional, Any
+
+from src.schemas.catalog import ImageRef
 
 
 class AddToCartRequest(BaseModel):
@@ -12,24 +15,23 @@ class UpdateCartItemRequest(BaseModel):
 
 
 class CartItemResponse(BaseModel):
-    id: str
     sku_id: str
+    product_id: str
+    name: str
+    sku_code: Optional[str] = None
     quantity: int
-    product_id: Optional[str] = None
-    title: Optional[str] = None
-    image: Optional[str] = None
-    price: Optional[int] = None
-    available: bool = True
+    unit_price: int
+    unit_price_at_add: Optional[int] = None
+    line_total: int
+    available_quantity: int
+    is_available: bool
     unavailable_reason: Optional[str] = None
-
-
-class CartSummary(BaseModel):
-    total_amount: int = 0
-    total_items: int = 0
-    unavailable_count: int = 0
-    checkout_ready: bool = True
+    image: Optional[ImageRef] = None
 
 
 class CartResponse(BaseModel):
-    items: List[CartItemResponse] = []
-    summary: CartSummary = CartSummary()
+    id: Optional[str] = None
+    items: list[CartItemResponse] = Field(default_factory=list)
+    items_count: int = 0
+    subtotal: int = 0
+    is_valid: bool = True

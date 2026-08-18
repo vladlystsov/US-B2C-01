@@ -1,23 +1,16 @@
-from pydantic import BaseModel
-from typing import List, Optional, Any
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+from src.schemas.catalog import CatalogProductCard
 
 
 class CollectionMetadata(BaseModel):
     id: str
-    title: str
+    name: str
     description: Optional[str] = None
-    cover_image_url: Optional[str] = None
-    target_url: Optional[str] = None
-    priority: int = 0
+    products: list[CatalogProductCard] = Field(default_factory=list)
 
 
-class CollectionsListResponse(BaseModel):
-    collections: List[CollectionMetadata] = []
-    total_count: int = 0
-
-
-class CollectionProductsResponse(BaseModel):
-    collection_title: str
-    items: List[Any] = []
-    unavailable_ids: List[str] = []
-    total_products: int = 0
+class CollectionProductsResponse(CollectionMetadata):
+    unavailable_ids: list[str] = Field(default_factory=list)
