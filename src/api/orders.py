@@ -24,6 +24,8 @@ def create_order(
             status_code=422,
             detail={"is_valid": False, "cart": result["cart"], "issues": result["issues"]},
         )
+    if result.get("code") == "IDEMPOTENCY_KEY_REUSED":
+        raise HTTPException(status_code=409, detail={"code": result["code"], "message": result["message"]})
     if result.get("code") == "B2B_UNAVAILABLE":
         raise HTTPException(status_code=503, detail={"code": result["code"], "message": result["message"]})
     if result.get("code") == "RESERVE_FAILED":

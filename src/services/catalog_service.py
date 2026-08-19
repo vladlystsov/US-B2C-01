@@ -48,19 +48,37 @@ class CatalogService:
             "offset": b2b_data.get("offset", offset),
         }
 
-    def get_facets(self, category_id: str | None = None) -> dict:
-        """Backward-compatible extension retained outside the published B2C surface."""
-        b2b_data = b2b_client.get_products(limit=100, offset=0, category=category_id)
-        brand_counts: dict[str, int] = {}
+    def get_facets(self, category_id: str | None = None, attributes: dict | None = None) -> dict:
+        """Build facets from the same attribute-rich public catalog response as the list."""
+        b2b_data = b2b_client.get_products(
+            limit=100,
+            offset=0,
+            category=category_id,
+            filters=attributes,
+        )
+        counts: dict[str, dict[str, int]] = {}
         for item in b2b_data.get("items", []):
-            characteristics = item.get("characteristics", [])
-            for char in characteristics if isinstance(characteristics, list) else []:
-                if char.get("name") == "Бренд":
-                    brand = char.get("value", "Unknown")
-                    brand_counts[brand] = brand_counts.get(brand, 0) + 1
+            characteristics = item.get("characteristics", []) or item.get("attributes", [])
+            for characteristic in characteristics:
+                name = characteristic.get("name") or characteristic.get("slug")
+                value = characteristic.get("value")
+                if not name or value is None:
+                    continue
+                value = str(value)
+                values = counts.setdefault(str(name), {})
+                values[value] = values.get(value, 0) + 1
         return {
             "category_id": category_id,
-            "facets": ([{"name": "brand", "values": [{"value": key, "count": value} for key, value in sorted(brand_counts.items(), key=lambda row: -row[1])]}] if brand_counts else []),
+            "facets": [
+                {
+                    "name": name,
+                    "values": [
+                        {"value": value, "count": count}
+                        for value, count in sorted(values.items(), key=lambda row: (-row[1], row[0]))
+                    ],
+                }
+                for name, values in sorted(counts.items())
+            ],
         }
 
 

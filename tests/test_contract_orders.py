@@ -108,7 +108,7 @@ def test_b2b_events_use_contract_path_payload_and_idempotency(client, db_session
 
 
 def test_delivered_transition_and_fulfill_use_inventory_path(db_session, monkeypatch):
-    order = Order(id="delivered", user_id=USER_ID, status="PAID", idempotency_key="deliver-key", delivery_address="address", total_amount=5000)
+    order = Order(id="delivered", user_id=USER_ID, status="DELIVERING", idempotency_key="deliver-key", delivery_address="address", total_amount=5000)
     db_session.add(order)
     db_session.add(OrderItem(id="delivered-item", order_id="delivered", sku_id=SKU_ID, product_id=PRODUCT_ID, product_title="Kettle", sku_name="Steel", quantity=1, unit_price=5000, line_total=5000))
     db_session.commit()

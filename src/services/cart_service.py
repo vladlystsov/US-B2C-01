@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+import httpx
 from sqlalchemy.orm import Session
 
 from src.models.cart import CartItem
@@ -30,17 +31,55 @@ class CartService:
             CartItem.user_id == identity["user_id"], CartItem.session_id == identity["session_id"]
         )
 
+    @staticmethod
+    def _sku_error(code: str, message: str) -> dict:
+        return {"error": code, "code": code, "message": message}
+
+    def _validate_sku(self, sku_id: str, requested_quantity: int) -> dict:
+        """Validate SKU existence and current stock in B2B before persisting a cart row."""
+        try:
+            sku = b2b_client.get_public_sku(sku_id)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                return self._sku_error("SKU_UNAVAILABLE", "SKU is unavailable")
+            return self._sku_error("B2B_UNAVAILABLE", "B2B service unavailable")
+        except Exception:
+            return self._sku_error("B2B_UNAVAILABLE", "B2B service unavailable")
+
+        available_quantity = sku.get("active_quantity", sku.get("available_quantity"))
+        if available_quantity is None:
+            return self._sku_error("SKU_UNAVAILABLE", "SKU is unavailable")
+        if available_quantity < requested_quantity:
+            return self._sku_error("SKU_UNAVAILABLE", "Requested quantity is unavailable")
+        product_id = sku.get("product_id")
+        if not product_id:
+            return self._sku_error("SKU_UNAVAILABLE", "SKU has no public product")
+        return {"sku": sku, "product_id": product_id}
+
     def add_item(self, sku_id: str, quantity: int, user_id: str | None = None, session_id: str | None = None) -> dict:
         query = self._query_items(user_id, session_id)
         if query is None:
-            return {"error": "MISSING_IDENTITY"}
+            return self._sku_error("MISSING_IDENTITY", "Cart identity is required")
         item = query.filter(CartItem.sku_id == sku_id).first()
+        requested_quantity = (item.quantity if item else 0) + quantity
+        validated = self._validate_sku(sku_id, requested_quantity)
+        if validated.get("error"):
+            return validated
+
         if item:
-            item.quantity += quantity
+            item.quantity = requested_quantity
+            item.product_id = validated["product_id"]
+            item.unavailable_reason = None
             item.updated_at = datetime.utcnow()
         else:
             identity = self._identity(user_id, session_id)
-            item = CartItem(id=str(uuid.uuid4()), sku_id=sku_id, quantity=quantity, **identity)
+            item = CartItem(
+                id=str(uuid.uuid4()),
+                sku_id=sku_id,
+                product_id=validated["product_id"],
+                quantity=quantity,
+                **identity,
+            )
             self.db.add(item)
         self.db.commit()
         return self.get_cart(user_id, session_id)
@@ -48,11 +87,16 @@ class CartService:
     def update_item(self, sku_id: str, quantity: int, user_id: str | None = None, session_id: str | None = None) -> dict:
         query = self._query_items(user_id, session_id)
         if query is None:
-            return {"error": "MISSING_IDENTITY"}
+            return self._sku_error("MISSING_IDENTITY", "Cart identity is required")
         item = query.filter(CartItem.sku_id == sku_id).first()
         if not item:
-            return {"error": "NOT_FOUND"}
+            return self._sku_error("NOT_FOUND", "Cart item not found")
+        validated = self._validate_sku(sku_id, quantity)
+        if validated.get("error"):
+            return validated
         item.quantity = quantity
+        item.product_id = validated["product_id"]
+        item.unavailable_reason = None
         item.updated_at = datetime.utcnow()
         self.db.commit()
         return self.get_cart(user_id, session_id)
@@ -60,10 +104,10 @@ class CartService:
     def remove_item(self, sku_id: str, user_id: str | None = None, session_id: str | None = None) -> dict:
         query = self._query_items(user_id, session_id)
         if query is None:
-            return {"error": "MISSING_IDENTITY"}
+            return self._sku_error("MISSING_IDENTITY", "Cart identity is required")
         item = query.filter(CartItem.sku_id == sku_id).first()
         if not item:
-            return {"error": "NOT_FOUND"}
+            return self._sku_error("NOT_FOUND", "Cart item not found")
         self.db.delete(item)
         self.db.commit()
         return self.get_cart(user_id, session_id)
@@ -79,9 +123,8 @@ class CartService:
     def _products_by_sku(self, sku_ids: list[str]) -> dict[str, dict]:
         if not sku_ids:
             return {}
-        # The B2B public batch endpoint returns an array. Product IDs are normally
-        # available from the cart creation flow; legacy rows fall back to the same
-        # compatibility proxy used by this MVP.
+        # Keep the batch route for legacy rows. Rows added by the current flow also
+        # carry product_id, while the SKU fallback remains compatible with old carts.
         try:
             data = b2b_client.get_products(limit=100, offset=0, ids=sku_ids)
             products = data.get("items", [])
@@ -93,8 +136,6 @@ class CartService:
                 if sku.get("id") in sku_ids:
                     mapped[sku["id"]] = product
 
-        # Legacy cart rows store only sku_id. Resolve missing entries through the
-        # public SKU endpoint, then retrieve their public product by product_id.
         for sku_id in set(sku_ids) - set(mapped):
             try:
                 sku = b2b_client.get_public_sku(sku_id)
@@ -124,6 +165,7 @@ class CartService:
         response_items = []
         subtotal = 0
         all_available = True
+        stale_reasons_cleared = False
         for item in db_items:
             product = by_sku.get(item.sku_id)
             details = cart_product_data(product, item.sku_id) if product else None
@@ -132,7 +174,7 @@ class CartService:
                 reason = reason or "PRODUCT_DELETED"
                 response_items.append({
                     "sku_id": item.sku_id,
-                    "product_id": "",
+                    "product_id": item.product_id or "",
                     "name": "Unavailable product",
                     "quantity": item.quantity,
                     "unit_price": 0,
@@ -145,9 +187,16 @@ class CartService:
                 all_available = False
                 continue
 
-            is_available = details["available_quantity"] >= item.quantity and not reason
+            # The public B2B response is authoritative. A returned SKU belongs to a
+            # visible product, therefore an old event marker must not keep it stale.
+            item.product_id = details["product_id"]
+            reason = None
+            if item.unavailable_reason is not None:
+                item.unavailable_reason = None
+                stale_reasons_cleared = True
+            is_available = details["available_quantity"] >= item.quantity
             if not is_available:
-                reason = reason or "OUT_OF_STOCK"
+                reason = "OUT_OF_STOCK"
                 all_available = False
             line_total = details["unit_price"] * item.quantity if is_available else 0
             subtotal += line_total
@@ -159,6 +208,8 @@ class CartService:
                 "unavailable_reason": reason,
             })
 
+        if stale_reasons_cleared:
+            self.db.commit()
         return {
             "items": response_items,
             "items_count": sum(item.quantity for item in db_items),

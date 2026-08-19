@@ -83,6 +83,18 @@ class B2BClient:
             response.raise_for_status()
             return response.json()
 
+    def get_similar_products(self, product_id: str, limit: int = 8) -> list[dict]:
+        with httpx.Client() as client:
+            response = client.get(
+                f"{self.base_url}/api/v1/public/products/{product_id}/similar",
+                params={"limit": limit},
+                headers=self.headers,
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data if isinstance(data, list) else data.get("items", [])
+
     def get_public_sku(self, sku_id: str) -> dict:
         with httpx.Client() as client:
             response = client.get(
