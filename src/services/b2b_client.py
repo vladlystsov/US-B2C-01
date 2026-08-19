@@ -8,7 +8,7 @@ from src.config import settings
 class B2BClient:
     def __init__(self):
         self.base_url = settings.B2B_SERVICE_URL
-        self.headers = {"X-Service-Key": settings.B2B_SERVICE_KEY}
+        self.headers = {"X-Service-Key": settings.B2C_TO_B2B_KEY}
 
     def get_products(
         self,
