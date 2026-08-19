@@ -8,16 +8,22 @@ from src.services.catalog_service import catalog_service
 router = APIRouter(prefix="/api/v1/catalog", tags=["Catalog"])
 
 
-def _attribute_filters(request: Request) -> dict[str, str]:
+def _attribute_filters(request: Request) -> dict[str, str | list[str]]:
     """Read OpenAPI deep-object filters without swallowing the known scalar filters."""
     reserved = {"category_id", "price_min", "price_max", "seller_id"}
-    attributes: dict[str, str] = {}
+    attributes: dict[str, str | list[str]] = {}
     for key, value in request.query_params.multi_items():
         for prefix in ("filters[", "filter["):
             if key.startswith(prefix) and key.endswith("]"):
                 attribute = key[len(prefix):-1]
                 if attribute and attribute not in reserved:
-                    attributes[attribute] = value
+                    current = attributes.get(attribute)
+                    if current is None:
+                        attributes[attribute] = value
+                    elif isinstance(current, list):
+                        current.append(value)
+                    else:
+                        attributes[attribute] = [current, value]
                 break
     return attributes
 

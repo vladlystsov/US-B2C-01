@@ -153,3 +153,17 @@ def test_facets_enrich_short_catalog_items_through_public_batch(client, monkeypa
     assert response.status_code == 200
     assert calls == [[PRODUCT_ID]]
     assert response.json()["facets"] == [{"name": "brand", "values": [{"value": "Neo", "count": 1}]}]
+
+
+def test_repeated_attribute_filter_values_are_forwarded_to_b2b(client, monkeypatch):
+    captured = {}
+
+    def fake_get_products(**kwargs):
+        captured.update(kwargs)
+        return {"items": [product()], "total_count": 1, "limit": 20, "offset": 0}
+
+    monkeypatch.setattr(b2b_client, "get_products", fake_get_products)
+    response = client.get("/api/v1/catalog/products?filter[brand]=Neo&filter[brand]=Other")
+
+    assert response.status_code == 200
+    assert captured["filters"] == {"brand": ["Neo", "Other"]}

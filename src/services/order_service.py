@@ -201,7 +201,9 @@ class OrderService:
         order = self.db.query(Order).filter(Order.id == order_id, Order.user_id == user_id).with_for_update().first()
         if not order:
             return {"code": "ORDER_NOT_FOUND", "message": "Order not found"}
-        if order.status not in ["CREATED", "PAID", "ASSEMBLING", "DELIVERING"]:
+        # Канонический flow отмены допускает только ранние состояния: товар
+        # ещё не передан в сборку и резерв можно безопасно снять.
+        if order.status not in ["CREATED", "PAID"]:
             return {
                 "code": "CANCEL_NOT_ALLOWED",
                 "message": f"Отмена невозможна: заказ в статусе {order.status}",
