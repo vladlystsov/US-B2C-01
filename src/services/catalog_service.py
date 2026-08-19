@@ -56,8 +56,12 @@ class CatalogService:
             category=category_id,
             filters=attributes,
         )
+        product_ids = [str(item["id"]) for item in b2b_data.get("items", []) if item.get("id")]
+        # Public list отвечает ProductPublicShortResponse. Характеристики для
+        # фасетов находятся только в ProductPublicResponse batch-контракта.
+        products = b2b_client.get_products_batch(product_ids) if product_ids else []
         counts: dict[str, dict[str, int]] = {}
-        for item in b2b_data.get("items", []):
+        for item in products:
             characteristics = item.get("characteristics", []) or item.get("attributes", [])
             for characteristic in characteristics:
                 name = characteristic.get("name") or characteristic.get("slug")

@@ -123,3 +123,33 @@ def test_checkout_changed_body_with_same_idempotency_key_returns_409(client, val
     assert {"id", "country", "city", "street", "building", "created_at"}.issubset(first.json()["address"])
     assert second.status_code == 409
     assert second.json()["code"] == "IDEMPOTENCY_KEY_REUSED"
+
+
+def test_facets_enrich_short_catalog_items_through_public_batch(client, monkeypatch):
+    calls = []
+    short = {
+        "id": PRODUCT_ID,
+        "title": "Kettle",
+        "slug": "kettle",
+        "status": "MODERATED",
+        "category_id": "00000000-0000-0000-0000-000000000100",
+        "min_price": 5000,
+        "cover_image": None,
+        "created_at": "2026-01-01T00:00:00Z",
+    }
+    monkeypatch.setattr(
+        b2b_client,
+        "get_products",
+        lambda **_kwargs: {"items": [short], "total_count": 1, "limit": 100, "offset": 0},
+    )
+    monkeypatch.setattr(
+        b2b_client,
+        "get_products_batch",
+        lambda product_ids: calls.append(product_ids) or [product()],
+    )
+
+    response = client.get("/api/v1/catalog/facets")
+
+    assert response.status_code == 200
+    assert calls == [[PRODUCT_ID]]
+    assert response.json()["facets"] == [{"name": "brand", "values": [{"value": "Neo", "count": 1}]}]

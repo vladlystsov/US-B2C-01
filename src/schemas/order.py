@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -27,6 +27,28 @@ class OrderItemResponse(BaseModel):
     image_url: Optional[str] = None
 
 
+class AddressResponse(BaseModel):
+    id: str
+    country: str
+    city: str
+    street: str
+    building: str
+    created_at: str
+    region: Optional[str] = None
+    apartment: Optional[str] = None
+    postal_code: Optional[str] = None
+    recipient_name: Optional[str] = None
+    recipient_phone: Optional[str] = None
+    is_default: bool = False
+    comment: Optional[str] = None
+
+
+class OrderStatusHistoryItem(BaseModel):
+    status: str
+    changed_at: str
+    reason: Optional[str] = None
+
+
 class OrderResponse(BaseModel):
     id: str
     buyer_id: str
@@ -35,10 +57,11 @@ class OrderResponse(BaseModel):
     subtotal: int
     delivery_cost: int = 0
     total: int
-    address: dict
+    address: AddressResponse
     payment_method: Optional[dict] = None
     comment: Optional[str] = None
-    status_history: list[dict] = Field(default_factory=list)
-    created_at: Optional[str] = None
+    cancel_reason: Optional[str] = None
+    status_history: list[OrderStatusHistoryItem] = Field(default_factory=list)
+    created_at: str
     paid_at: Optional[str] = None
     delivered_at: Optional[str] = None

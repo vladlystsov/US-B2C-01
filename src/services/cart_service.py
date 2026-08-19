@@ -120,16 +120,21 @@ class CartService:
         self.db.commit()
         return True
 
-    def _products_by_sku(self, sku_ids: list[str]) -> dict[str, dict]:
+    def _products_by_sku(self, items: list[CartItem]) -> dict[str, dict]:
+        """Resolve cart rows through the B2B public batch contract.
+
+        New rows persist product_id after SKU validation. Only legacy rows without
+        it need an SKU-detail then product-detail fallback.
+        """
+        sku_ids = [item.sku_id for item in items]
         if not sku_ids:
             return {}
-        # Keep the batch route for legacy rows. Rows added by the current flow also
-        # carry product_id, while the SKU fallback remains compatible with old carts.
+        product_ids = list({item.product_id for item in items if item.product_id})
         try:
-            data = b2b_client.get_products(limit=100, offset=0, ids=sku_ids)
-            products = data.get("items", [])
+            products = b2b_client.get_products_batch(product_ids) if product_ids else []
         except Exception:
             products = []
+
         mapped: dict[str, dict] = {}
         for product in products:
             for sku in product.get("skus", []) or []:
@@ -158,7 +163,7 @@ class CartService:
             return {"items": [], "items_count": 0, "subtotal": 0, "is_valid": True}
 
         try:
-            by_sku = self._products_by_sku([item.sku_id for item in db_items])
+            by_sku = self._products_by_sku(db_items)
         except Exception:
             by_sku = {}
 

@@ -48,6 +48,7 @@ def test_subscriptions_accept_events_and_return_204(client, valid_jwt_with_fixed
 def test_cart_patch_delete_and_merge_return_cart_response(client, db_session, valid_jwt_with_fixed_id, monkeypatch):
     token, _ = valid_jwt_with_fixed_id
     monkeypatch.setattr(b2b_client, "get_products", lambda **_: {"items": [product()]})
+    monkeypatch.setattr(b2b_client, "get_products_batch", lambda _product_ids: [product()])
     monkeypatch.setattr(
         b2b_client,
         "get_public_sku",
