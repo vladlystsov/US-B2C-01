@@ -56,8 +56,11 @@ def test_product_card_excludes_seller_only_sku_fields(client, monkeypatch):
 
 
 def test_similar_returns_plain_array_with_contract_cards(client, monkeypatch):
-    monkeypatch.setattr(b2b_client, "get_product_by_id", lambda _id: public_product())
-    monkeypatch.setattr(b2b_client, "get_products", lambda **_: {"items": [public_product(), public_product("00000000-0000-0000-0000-000000000002")], "total_count": 2})
+    monkeypatch.setattr(
+        b2b_client,
+        "get_similar_products",
+        lambda _id, limit: [public_product(), public_product("00000000-0000-0000-0000-000000000002")],
+    )
     response = client.get(f"/api/v1/catalog/products/{PRODUCT_ID}/similar?limit=50")
     assert response.status_code == 200
     assert isinstance(response.json(), list)

@@ -48,6 +48,12 @@ def test_subscriptions_accept_events_and_return_204(client, valid_jwt_with_fixed
 def test_cart_patch_delete_and_merge_return_cart_response(client, db_session, valid_jwt_with_fixed_id, monkeypatch):
     token, _ = valid_jwt_with_fixed_id
     monkeypatch.setattr(b2b_client, "get_products", lambda **_: {"items": [product()]})
+    monkeypatch.setattr(b2b_client, "get_products_batch", lambda _product_ids: [product()])
+    monkeypatch.setattr(
+        b2b_client,
+        "get_public_sku",
+        lambda _sku_id: {**product()["skus"][0], "product_id": PRODUCT_ID},
+    )
     session = "00000000-0000-0000-0000-000000000222"
     added = client.post("/api/v1/cart/items", headers={"X-Session-Id": session}, json={"sku_id": SKU_ID, "quantity": 2})
     assert added.status_code == 200 and added.json()["subtotal"] == 10000

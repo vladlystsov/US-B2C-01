@@ -33,9 +33,21 @@ def get_cart(identity: dict = Depends(get_identity), db: Session = Depends(get_d
     return CartService(db).get_cart(**identity)
 
 
+def _raise_cart_error(result: dict) -> None:
+    code = result.get("error")
+    if not code:
+        return
+    status_code = 502 if code == "B2B_UNAVAILABLE" else 404 if code == "NOT_FOUND" else 409
+    if code == "MISSING_IDENTITY":
+        status_code = 400
+    raise HTTPException(status_code=status_code, detail={"code": result["code"], "message": result["message"]})
+
+
 @router.post("/items", response_model=CartResponse)
 def add_to_cart(request: AddToCartRequest, identity: dict = Depends(get_identity), db: Session = Depends(get_db)):
-    return CartService(db).add_item(request.sku_id, request.quantity, **identity)
+    result = CartService(db).add_item(request.sku_id, request.quantity, **identity)
+    _raise_cart_error(result)
+    return result
 
 
 @router.patch("/items/{sku_id}", response_model=CartResponse)
@@ -46,16 +58,14 @@ def update_cart_item(
     db: Session = Depends(get_db),
 ):
     result = CartService(db).update_item(sku_id, request.quantity, **identity)
-    if result.get("error") == "NOT_FOUND":
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Cart item not found"})
+    _raise_cart_error(result)
     return result
 
 
 @router.delete("/items/{sku_id}", response_model=CartResponse)
 def remove_from_cart(sku_id: str, identity: dict = Depends(get_identity), db: Session = Depends(get_db)):
     result = CartService(db).remove_item(sku_id, **identity)
-    if result.get("error") == "NOT_FOUND":
-        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Cart item not found"})
+    _raise_cart_error(result)
     return result
 
 

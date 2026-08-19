@@ -10,7 +10,10 @@ class Settings:
     DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./neomarket_b2c.db")
 
     B2B_SERVICE_URL = os.getenv("B2B_SERVICE_URL", "http://localhost:8000")
+    # Legacy B2B_SERVICE_KEY is retained as the development fallback.
     B2B_SERVICE_KEY = os.getenv("B2B_SERVICE_KEY", "b2c-secret-key-123")
+    B2C_TO_B2B_KEY = os.getenv("B2C_TO_B2B_KEY", B2B_SERVICE_KEY)
+    B2B_TO_B2C_KEY = os.getenv("B2B_TO_B2C_KEY", "b2c-secret-key-123")
 
     DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 

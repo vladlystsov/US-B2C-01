@@ -13,6 +13,7 @@ class Order(Base):
     status = Column(String(50), nullable=False, default="PAID")
     total_amount = Column(Integer, nullable=False, default=0)
     idempotency_key = Column(String(255), nullable=False, unique=True, index=True)
+    request_fingerprint = Column(String(64), nullable=True)
     delivery_address = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), default=func.now(), nullable=False)
