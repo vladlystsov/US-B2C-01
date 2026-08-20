@@ -3,7 +3,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.models.cart import CartItem
+from src.models.price_drop_notification import PriceDropNotification
 from src.models.processed_event import ProcessedEvent
+from src.models.subscription import ProductSubscription
 
 
 class EventService:
@@ -43,7 +45,32 @@ class EventService:
         sku_ids = payload.get("sku_ids") or ([payload["sku_id"]] if payload.get("sku_id") else [])
         product_id = payload.get("product_id")
 
-        if event_type == "SKU_BACK_IN_STOCK":
+        if event_type == "PRICE_CHANGED":
+            old_price = payload.get("old_price")
+            new_price = payload.get("new_price")
+            sku_id = payload.get("sku_id")
+            # B2C catalog is a live B2B public-catalog projection, so its next
+            # read already reflects the new B2B price. The persisted side effect
+            # here is the durable notification work for PRICE_DROP subscribers.
+            if product_id and sku_id and isinstance(old_price, int) and isinstance(new_price, int) and new_price < old_price:
+                subscriptions = self.db.query(ProductSubscription).filter(
+                    ProductSubscription.product_id == product_id
+                ).all()
+                for subscription in subscriptions:
+                    notify_on = subscription.notify_on or []
+                    if "PRICE_DROP" in notify_on or "PRICE_DOWN" in notify_on:
+                        self.db.add(
+                            PriceDropNotification(
+                                event_idempotency_key=idempotency_key,
+                                subscription_id=subscription.id,
+                                user_id=subscription.user_id,
+                                product_id=product_id,
+                                sku_id=sku_id,
+                                old_price=old_price,
+                                new_price=new_price,
+                            )
+                        )
+        elif event_type == "SKU_BACK_IN_STOCK":
             query = self.db.query(CartItem)
             conditions = []
             if sku_ids:

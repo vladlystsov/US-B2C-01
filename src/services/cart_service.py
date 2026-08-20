@@ -222,6 +222,23 @@ class CartService:
             "is_valid": all_available,
         }
 
+    def validate_cart(self, user_id: str | None = None, session_id: str | None = None) -> dict:
+        """Return checkout readiness and per-SKU issues from current B2B data."""
+        cart = self.get_cart(user_id=user_id, session_id=session_id)
+        issues: list[dict] = []
+        if not cart["items"]:
+            issues.append({"sku_id": "", "type": "OUT_OF_STOCK", "message": "Cart is empty"})
+        for item in cart["items"]:
+            if not item["is_available"]:
+                issues.append(
+                    {
+                        "sku_id": item["sku_id"],
+                        "type": item.get("unavailable_reason") or "OUT_OF_STOCK",
+                        "message": "SKU is no longer available in the requested quantity",
+                    }
+                )
+        return {"is_valid": not issues, "cart": cart, "issues": issues}
+
     def merge_guest_cart(self, user_id: str, session_id: str) -> dict:
         guest_items = self.db.query(CartItem).filter(CartItem.session_id == session_id, CartItem.user_id.is_(None)).all()
         for guest_item in guest_items:

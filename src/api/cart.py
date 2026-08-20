@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from src.config import settings
 from src.database import get_db
-from src.schemas.cart import AddToCartRequest, CartResponse, UpdateCartItemRequest
+from src.schemas.cart import AddToCartRequest, CartResponse, CartValidationResponse, UpdateCartItemRequest
 from src.services.cart_service import CartService
 
 router = APIRouter(prefix="/api/v1/cart", tags=["Cart"])
@@ -41,6 +41,11 @@ def _raise_cart_error(result: dict) -> None:
     if code == "MISSING_IDENTITY":
         status_code = 400
     raise HTTPException(status_code=status_code, detail={"code": result["code"], "message": result["message"]})
+
+
+@router.post("/validate", response_model=CartValidationResponse)
+def validate_cart(identity: dict = Depends(get_identity), db: Session = Depends(get_db)):
+    return CartService(db).validate_cart(**identity)
 
 
 @router.post("/items", response_model=CartResponse)

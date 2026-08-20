@@ -81,7 +81,7 @@ def test_checkout_invalid_cart_returns_structured_422(client, valid_jwt_with_fix
     assert set(response.json()) == {"is_valid", "cart", "issues"}
 
 
-def test_cancel_paid_and_reject_assembling_orders_and_hide_other_users(client, db_session, valid_jwt_with_fixed_id, monkeypatch):
+def test_cancel_paid_and_assembling_orders_and_hide_other_users(client, db_session, valid_jwt_with_fixed_id, monkeypatch):
     token, _ = valid_jwt_with_fixed_id
     db_session.add(Order(id=ORDER_ID, user_id=USER_ID, status="PAID", idempotency_key="key-1", delivery_address="address", total_amount=5000))
     db_session.add(OrderItem(id="item", order_id=ORDER_ID, sku_id=SKU_ID, product_id=PRODUCT_ID, product_title="Kettle", sku_name="Steel", quantity=1, unit_price=5000, line_total=5000))
@@ -92,9 +92,9 @@ def test_cancel_paid_and_reject_assembling_orders_and_hide_other_users(client, d
     assembling = Order(id="assembling", user_id=USER_ID, status="ASSEMBLING", idempotency_key="key-assembling", delivery_address="address", total_amount=5000)
     db_session.add(assembling)
     db_session.commit()
-    rejected = client.post("/api/v1/orders/assembling/cancel", headers=auth_header(token))
-    assert rejected.status_code == 409
-    assert rejected.json()["code"] == "CANCEL_NOT_ALLOWED"
+    cancelled_assembling = client.post("/api/v1/orders/assembling/cancel", headers=auth_header(token))
+    assert cancelled_assembling.status_code == 200
+    assert cancelled_assembling.json()["status"] == "CANCELLED"
 
     unknown = client.get(f"/api/v1/orders/{ORDER_ID}", headers={"Authorization": auth_header(token)["Authorization"].replace(token, "")})
     assert unknown.status_code in (401, 404)

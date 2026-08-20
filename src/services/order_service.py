@@ -84,6 +84,44 @@ class OrderService:
         defaults.update(decoded)
         return defaults
 
+    @staticmethod
+    def _payment_method_snapshot(payment_method_id: str, created_at: datetime | None = None) -> str:
+        """Persist the complete mock PaymentMethodResponse used at checkout."""
+        return json.dumps(
+            {
+                "id": payment_method_id,
+                "type": "CARD",
+                "is_default": False,
+                "created_at": (created_at or datetime.utcnow()).isoformat(),
+            },
+            ensure_ascii=False,
+        )
+
+    @staticmethod
+    def _payment_method_response(
+        stored_payment_method: str | None,
+        created_at: datetime | None,
+        fallback_id: str | None = None,
+    ) -> dict | None:
+        if not stored_payment_method and not fallback_id:
+            return None
+        fallback = {
+            "id": fallback_id or "",
+            "type": "CARD",
+            "is_default": False,
+            "created_at": str(created_at) if created_at else None,
+        }
+        if not stored_payment_method:
+            return fallback
+        try:
+            decoded = json.loads(stored_payment_method)
+        except (TypeError, json.JSONDecodeError):
+            return fallback
+        if not isinstance(decoded, dict):
+            return fallback
+        fallback.update(decoded)
+        return fallback
+
     def _same_request(self, existing: Order, user_id: str, request, fingerprint: str) -> bool:
         if existing.user_id != user_id:
             return False
@@ -172,6 +210,7 @@ class OrderService:
             idempotency_key=idempotency_key,
             request_fingerprint=fingerprint,
             delivery_address=self._address_snapshot(request.address_id, created_at),
+            payment_method_snapshot=self._payment_method_snapshot(request.payment_method_id, created_at),
             total_amount=subtotal,
             created_at=created_at,
         )
@@ -201,9 +240,9 @@ class OrderService:
         order = self.db.query(Order).filter(Order.id == order_id, Order.user_id == user_id).with_for_update().first()
         if not order:
             return {"code": "ORDER_NOT_FOUND", "message": "Order not found"}
-        # Канонический flow отмены допускает только ранние состояния: товар
-        # ещё не передан в сборку и резерв можно безопасно снять.
-        if order.status not in ["CREATED", "PAID"]:
+        # Актуальный канон разрешает покупателю отмену, пока заказ ещё не
+        # доставлен: CREATED, PAID, ASSEMBLING и DELIVERING.
+        if order.status not in ["CREATED", "PAID", "ASSEMBLING", "DELIVERING"]:
             return {
                 "code": "CANCEL_NOT_ALLOWED",
                 "message": f"Отмена невозможна: заказ в статусе {order.status}",
@@ -306,7 +345,11 @@ class OrderService:
             "delivery_cost": 0,
             "total": order.total_amount if order.total_amount is not None else subtotal,
             "address": self._address_response(order.delivery_address, order.created_at),
-            "payment_method": {"id": payment_method_id} if payment_method_id else None,
+            "payment_method": self._payment_method_response(
+                order.payment_method_snapshot,
+                order.created_at,
+                fallback_id=payment_method_id,
+            ),
             "comment": comment,
             "cancel_reason": cancel_reason,
             "created_at": created_at,

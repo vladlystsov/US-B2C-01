@@ -30,12 +30,13 @@ class CatalogService:
         if price_min is not None and price_max is not None and price_min > price_max:
             raise ValueError("filter[price_min] must not exceed filter[price_max]")
 
+        effective_sort = sort or "popularity"
         b2b_data = b2b_client.get_products(
             limit=limit,
             offset=offset,
             category=category_id,
             search=q,
-            sort=sort,
+            sort=effective_sort,
             price_min=price_min,
             price_max=price_max,
             seller_id=seller_id,
@@ -49,14 +50,26 @@ class CatalogService:
         }
 
     def get_facets(self, category_id: str | None = None, attributes: dict | None = None) -> dict:
-        """Build facets from the same attribute-rich public catalog response as the list."""
-        b2b_data = b2b_client.get_products(
-            limit=100,
-            offset=0,
-            category=category_id,
-            filters=attributes,
-        )
-        product_ids = [str(item["id"]) for item in b2b_data.get("items", []) if item.get("id")]
+        """Build facets from every matching public-catalog page, not page one only."""
+        page_size = 100
+        offset = 0
+        short_items: list[dict] = []
+        total_count = None
+        while total_count is None or offset < total_count:
+            b2b_data = b2b_client.get_products(
+                limit=page_size,
+                offset=offset,
+                category=category_id,
+                sort="popularity",
+                filters=attributes,
+            )
+            page_items = b2b_data.get("items", [])
+            short_items.extend(page_items)
+            total_count = b2b_data.get("total_count", len(short_items))
+            if not page_items:
+                break
+            offset += len(page_items)
+        product_ids = [str(item["id"]) for item in short_items if item.get("id")]
         # Public list отвечает ProductPublicShortResponse. Характеристики для
         # фасетов находятся только в ProductPublicResponse batch-контракта.
         products = b2b_client.get_products_batch(product_ids) if product_ids else []
