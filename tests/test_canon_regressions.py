@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 from src.config import settings
 from src.models.cart import CartItem
+from src.models.price_drop_notification import PriceDropNotification
+from src.models.subscription import ProductSubscription
 from src.services import order_service
 from src.services.b2b_client import b2b_client
 from src.services.cart_service import CartService
@@ -9,6 +11,7 @@ from src.services.cart_service import CartService
 USER_ID = "123e4567-e89b-12d3-a456-426614174000"
 PRODUCT_ID = "00000000-0000-0000-0000-000000000001"
 SKU_ID = "00000000-0000-0000-0000-000000000010"
+PRICE_PRODUCT_ID = "00000000-0000-0000-0000-000000000002"
 
 
 def product():
@@ -121,6 +124,7 @@ def test_checkout_changed_body_with_same_idempotency_key_returns_409(client, val
 
     assert first.status_code == 201
     assert {"id", "country", "city", "street", "building", "created_at"}.issubset(first.json()["address"])
+    assert {"id", "type", "created_at"}.issubset(first.json()["payment_method"])
     assert second.status_code == 409
     assert second.json()["code"] == "IDEMPOTENCY_KEY_REUSED"
 
@@ -167,3 +171,58 @@ def test_repeated_attribute_filter_values_are_forwarded_to_b2b(client, monkeypat
 
     assert response.status_code == 200
     assert captured["filters"] == {"brand": ["Neo", "Other"]}
+
+
+def test_price_changed_enqueues_price_drop_notifications(client, db_session):
+    db_session.add(
+        ProductSubscription(
+            id="subscription-price-drop",
+            user_id=USER_ID,
+            product_id=PRICE_PRODUCT_ID,
+            notify_on=["PRICE_DROP"],
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/b2b/events",
+        headers={"X-Service-Key": settings.B2B_TO_B2C_KEY},
+        json={
+            "event_type": "PRICE_CHANGED",
+            "idempotency_key": "00000000-0000-0000-0000-000000000704",
+            "occurred_at": "2026-01-01T00:00:00Z",
+            "payload": {"product_id": PRICE_PRODUCT_ID, "sku_id": SKU_ID, "old_price": 5000, "new_price": 4200},
+        },
+    )
+
+    assert response.status_code == 202
+    notification = db_session.query(PriceDropNotification).one()
+    assert (notification.user_id, notification.product_id, notification.sku_id) == (USER_ID, PRICE_PRODUCT_ID, SKU_ID)
+    assert (notification.old_price, notification.new_price) == (5000, 4200)
+
+
+def test_cart_validate_returns_current_cart_and_issues(client, db_session, monkeypatch):
+    db_session.add(CartItem(id="validate-item", user_id=None, session_id="guest-validate", sku_id=SKU_ID, product_id=PRODUCT_ID, quantity=1))
+    db_session.commit()
+    monkeypatch.setattr(b2b_client, "get_products_batch", lambda _product_ids: [product()])
+
+    response = client.post("/api/v1/cart/validate", headers={"X-Session-Id": "guest-validate"})
+
+    assert response.status_code == 200
+    assert response.json()["is_valid"] is True
+    assert response.json()["issues"] == []
+    assert response.json()["cart"]["items"][0]["sku_id"] == SKU_ID
+
+
+def test_similar_products_forwards_contract_limit_to_b2b(client, monkeypatch):
+    captured = {}
+
+    def fake_similar(product_id, limit):
+        captured.update({"product_id": product_id, "limit": limit})
+        return [product()]
+
+    monkeypatch.setattr(b2b_client, "get_similar_products", fake_similar)
+    response = client.get(f"/api/v1/catalog/products/{PRODUCT_ID}/similar?limit=50")
+
+    assert response.status_code == 200
+    assert captured == {"product_id": PRODUCT_ID, "limit": 50}

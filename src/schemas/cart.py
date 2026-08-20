@@ -35,3 +35,15 @@ class CartResponse(BaseModel):
     items_count: int = 0
     subtotal: int = 0
     is_valid: bool = True
+
+
+class CartValidationIssue(BaseModel):
+    sku_id: str
+    type: str
+    message: str
+
+
+class CartValidationResponse(BaseModel):
+    is_valid: bool
+    cart: CartResponse
+    issues: list[CartValidationIssue] = Field(default_factory=list)

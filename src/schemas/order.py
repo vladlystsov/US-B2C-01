@@ -49,6 +49,15 @@ class OrderStatusHistoryItem(BaseModel):
     reason: Optional[str] = None
 
 
+class PaymentMethodResponse(BaseModel):
+    id: str
+    type: str
+    created_at: str
+    card_last4: Optional[str] = None
+    card_brand: Optional[str] = None
+    is_default: bool = False
+
+
 class OrderResponse(BaseModel):
     id: str
     buyer_id: str
@@ -58,7 +67,7 @@ class OrderResponse(BaseModel):
     delivery_cost: int = 0
     total: int
     address: AddressResponse
-    payment_method: Optional[dict] = None
+    payment_method: Optional[PaymentMethodResponse] = None
     comment: Optional[str] = None
     cancel_reason: Optional[str] = None
     status_history: list[OrderStatusHistoryItem] = Field(default_factory=list)
