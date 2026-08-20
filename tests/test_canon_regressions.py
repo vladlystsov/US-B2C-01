@@ -226,3 +226,69 @@ def test_similar_products_forwards_contract_limit_to_b2b(client, monkeypatch):
 
     assert response.status_code == 200
     assert captured == {"product_id": PRODUCT_ID, "limit": 50}
+
+
+def test_catalog_uses_openapi_default_popularity_sort(client, monkeypatch):
+    captured = {}
+
+    def fake_get_products(**kwargs):
+        captured.update(kwargs)
+        return {"items": [], "total_count": 0, "limit": 20, "offset": 0}
+
+    monkeypatch.setattr(b2b_client, "get_products", fake_get_products)
+    response = client.get("/api/v1/catalog/products")
+
+    assert response.status_code == 200
+    assert captured["sort"] == "popularity"
+
+
+def test_facets_collect_all_b2b_pages(client, monkeypatch):
+    first_id = PRODUCT_ID
+    second_id = "00000000-0000-0000-0000-000000000099"
+    calls = []
+
+    def fake_get_products(**kwargs):
+        calls.append(kwargs)
+        if kwargs["offset"] == 0:
+            return {"items": [{"id": first_id}], "total_count": 2, "limit": 100, "offset": 0}
+        return {"items": [{"id": second_id}], "total_count": 2, "limit": 100, "offset": 1}
+
+    first_product = product()
+    second_product = product() | {"id": second_id, "characteristics": [{"name": "brand", "value": "Other"}]}
+    monkeypatch.setattr(b2b_client, "get_products", fake_get_products)
+    monkeypatch.setattr(b2b_client, "get_products_batch", lambda ids: [first_product, second_product] if ids == [first_id, second_id] else [])
+
+    response = client.get("/api/v1/catalog/facets")
+
+    assert response.status_code == 200
+    assert [call["offset"] for call in calls] == [0, 1]
+    assert response.json()["facets"] == [{"name": "brand", "values": [{"value": "Neo", "count": 1}, {"value": "Other", "count": 1}]}]
+
+
+class _UnavailableClient:
+    def __enter__(self):
+        raise RuntimeError("B2B unavailable")
+
+    def __exit__(self, *_args):
+        return False
+
+
+def test_checkout_returns_503_when_b2b_reserve_is_unavailable(client, valid_jwt_with_fixed_id, monkeypatch):
+    token, _ = valid_jwt_with_fixed_id
+    cart = {
+        "items": [{"sku_id": SKU_ID, "product_id": PRODUCT_ID, "name": "Kettle", "sku_code": "STEEL", "quantity": 1, "unit_price": 5000, "available_quantity": 3, "is_available": True}],
+        "items_count": 1,
+        "subtotal": 5000,
+        "is_valid": True,
+    }
+    monkeypatch.setattr(CartService, "get_cart", lambda *_args, **_kwargs: cart)
+    monkeypatch.setattr(order_service.httpx, "Client", _UnavailableClient)
+
+    response = client.post(
+        "/api/v1/orders",
+        headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "00000000-0000-0000-0000-000000000705"},
+        json={"address_id": "00000000-0000-0000-0000-000000000401", "payment_method_id": "00000000-0000-0000-0000-000000000501"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"code": "B2B_UNAVAILABLE", "message": "B2B service unavailable"}
