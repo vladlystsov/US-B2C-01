@@ -14,6 +14,7 @@ class CartItem(Base):
     # в котором B2B передаёт product_id без списка SKU.
     product_id = Column(String(36), nullable=True, index=True)
     quantity = Column(Integer, nullable=False, default=1)
+    # Contractual `CartValidationIssue.type`; never stores a free-form upstream reason.
     unavailable_reason = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), default=func.now(), nullable=False)

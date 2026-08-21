@@ -7,6 +7,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from src.models.cart import CartItem
+from src.models.cart_unavailability import CartUnavailability
 from src.services.b2b_client import b2b_client
 from src.services.catalog_mapper import cart_product_data
 
@@ -70,6 +71,9 @@ class CartService:
             item.quantity = requested_quantity
             item.product_id = validated["product_id"]
             item.unavailable_reason = None
+            self.db.query(CartUnavailability).filter(
+                CartUnavailability.cart_item_id == item.id
+            ).delete(synchronize_session=False)
             item.updated_at = datetime.utcnow()
         else:
             identity = self._identity(user_id, session_id)
@@ -97,6 +101,9 @@ class CartService:
         item.quantity = quantity
         item.product_id = validated["product_id"]
         item.unavailable_reason = None
+        self.db.query(CartUnavailability).filter(
+            CartUnavailability.cart_item_id == item.id
+        ).delete(synchronize_session=False)
         item.updated_at = datetime.utcnow()
         self.db.commit()
         return self.get_cart(user_id, session_id)
@@ -108,6 +115,9 @@ class CartService:
         item = query.filter(CartItem.sku_id == sku_id).first()
         if not item:
             return self._sku_error("NOT_FOUND", "Cart item not found")
+        self.db.query(CartUnavailability).filter(
+            CartUnavailability.cart_item_id == item.id
+        ).delete(synchronize_session=False)
         self.db.delete(item)
         self.db.commit()
         return self.get_cart(user_id, session_id)
@@ -116,6 +126,12 @@ class CartService:
         query = self._query_items(user_id, session_id)
         if query is None:
             return False
+        items = query.all()
+        item_ids = [item.id for item in items]
+        if item_ids:
+            self.db.query(CartUnavailability).filter(
+                CartUnavailability.cart_item_id.in_(item_ids)
+            ).delete(synchronize_session=False)
         query.delete(synchronize_session=False)
         self.db.commit()
         return True
@@ -167,14 +183,21 @@ class CartService:
         except Exception:
             by_sku = {}
 
+        messages_by_item_id = {
+            entry.cart_item_id: entry.message
+            for entry in self.db.query(CartUnavailability).filter(
+                CartUnavailability.cart_item_id.in_([item.id for item in db_items])
+            ).all()
+        }
         response_items = []
         subtotal = 0
         all_available = True
-        stale_reasons_cleared = False
+        stale_reason_item_ids: list[str] = []
         for item in db_items:
             product = by_sku.get(item.sku_id)
             details = cart_product_data(product, item.sku_id) if product else None
             reason = item.unavailable_reason
+            reason_message = messages_by_item_id.get(item.id)
             if not details:
                 reason = reason or "PRODUCT_DELETED"
                 response_items.append({
@@ -187,6 +210,7 @@ class CartService:
                     "available_quantity": 0,
                     "is_available": False,
                     "unavailable_reason": reason,
+                    "unavailable_message": reason_message,
                     "image": None,
                 })
                 all_available = False
@@ -196,9 +220,10 @@ class CartService:
             # visible product, therefore an old event marker must not keep it stale.
             item.product_id = details["product_id"]
             reason = None
-            if item.unavailable_reason is not None:
+            if item.unavailable_reason is not None or reason_message is not None:
                 item.unavailable_reason = None
-                stale_reasons_cleared = True
+                stale_reason_item_ids.append(item.id)
+            reason_message = None
             is_available = details["available_quantity"] >= item.quantity
             if not is_available:
                 reason = "OUT_OF_STOCK"
@@ -211,9 +236,13 @@ class CartService:
                 "line_total": line_total,
                 "is_available": is_available,
                 "unavailable_reason": reason,
+                "unavailable_message": reason_message,
             })
 
-        if stale_reasons_cleared:
+        if stale_reason_item_ids:
+            self.db.query(CartUnavailability).filter(
+                CartUnavailability.cart_item_id.in_(stale_reason_item_ids)
+            ).delete(synchronize_session=False)
             self.db.commit()
         return {
             "items": response_items,
@@ -234,7 +263,7 @@ class CartService:
                     {
                         "sku_id": item["sku_id"],
                         "type": item.get("unavailable_reason") or "OUT_OF_STOCK",
-                        "message": "SKU is no longer available in the requested quantity",
+                        "message": item.get("unavailable_message") or "SKU is no longer available in the requested quantity",
                     }
                 )
         return {"is_valid": not issues, "cart": cart, "issues": issues}

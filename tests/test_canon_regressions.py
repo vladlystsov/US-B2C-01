@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from src.config import settings
 from src.models.cart import CartItem
+from src.models.cart_unavailability import CartUnavailability
 from src.models.price_drop_notification import PriceDropNotification
 from src.models.subscription import ProductSubscription
 from src.services import order_service
@@ -292,3 +293,59 @@ def test_checkout_returns_503_when_b2b_reserve_is_unavailable(client, valid_jwt_
 
     assert response.status_code == 503
     assert response.json() == {"code": "B2B_UNAVAILABLE", "message": "B2B service unavailable"}
+
+
+
+def test_nested_b2c_attribute_filter_is_forwarded_as_b2b_filters(client, monkeypatch):
+    captured = {}
+
+    def fake_get_products(**kwargs):
+        captured.update(kwargs)
+        return {"items": [product()], "total_count": 1, "limit": 20, "offset": 0}
+
+    monkeypatch.setattr(b2b_client, "get_products", fake_get_products)
+    response = client.get("/api/v1/catalog/products?filter[attributes][brand]=Neo&filter[attributes][memory]=256")
+
+    assert response.status_code == 200
+    assert captured["filters"] == {"brand": "Neo", "memory": "256"}
+
+
+def test_block_event_keeps_contract_issue_type_and_exposes_reason_as_message(client, db_session, monkeypatch):
+    db_session.add(
+        CartItem(
+            id="cart-human-reason",
+            user_id=None,
+            session_id="guest-human-reason",
+            sku_id=SKU_ID,
+            product_id=PRODUCT_ID,
+            quantity=1,
+        )
+    )
+    db_session.commit()
+    event_response = client.post(
+        "/api/v1/b2b/events",
+        headers={"X-Service-Key": settings.B2B_TO_B2C_KEY},
+        json={
+            "event_type": "PRODUCT_BLOCKED",
+            "idempotency_key": "00000000-0000-0000-0000-000000000706",
+            "occurred_at": "2026-01-01T00:00:00Z",
+            "payload": {"product_id": PRODUCT_ID, "reason": "Product contains prohibited content"},
+        },
+    )
+    assert event_response.status_code == 202
+    stored = db_session.get(CartItem, "cart-human-reason")
+    assert stored.unavailable_reason == "PRODUCT_BLOCKED"
+    assert db_session.get(CartUnavailability, stored.id).message == "Product contains prohibited content"
+
+    monkeypatch.setattr(b2b_client, "get_products_batch", lambda _product_ids: [])
+    monkeypatch.setattr(b2b_client, "get_public_sku", lambda _sku_id: (_ for _ in ()).throw(RuntimeError("not public")))
+    response = client.post("/api/v1/cart/validate", headers={"X-Session-Id": "guest-human-reason"})
+
+    assert response.status_code == 200
+    assert response.json()["issues"] == [
+        {
+            "sku_id": SKU_ID,
+            "type": "PRODUCT_BLOCKED",
+            "message": "Product contains prohibited content",
+        }
+    ]
