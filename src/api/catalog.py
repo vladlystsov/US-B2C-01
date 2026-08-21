@@ -9,22 +9,32 @@ router = APIRouter(prefix="/api/v1/catalog", tags=["Catalog"])
 
 
 def _attribute_filters(request: Request) -> dict[str, str | list[str]]:
-    """Read OpenAPI deep-object filters without swallowing the known scalar filters."""
+    """Translate B2C `filter[attributes][key]` into B2B `filters[key]`.
+
+    B2C nests dynamic attributes inside CatalogFilter, while B2B exposes its
+    characteristic filters as a standalone deepObject. Existing flat filter
+    spellings remain accepted for backwards compatibility.
+    """
     reserved = {"category_id", "price_min", "price_max", "seller_id"}
     attributes: dict[str, str | list[str]] = {}
     for key, value in request.query_params.multi_items():
-        for prefix in ("filters[", "filter["):
+        attribute = None
+        for prefix in ("filter[attributes][", "filters["):
             if key.startswith(prefix) and key.endswith("]"):
                 attribute = key[len(prefix):-1]
-                if attribute and attribute not in reserved:
-                    current = attributes.get(attribute)
-                    if current is None:
-                        attributes[attribute] = value
-                    elif isinstance(current, list):
-                        current.append(value)
-                    else:
-                        attributes[attribute] = [current, value]
                 break
+        if attribute is None and key.startswith("filter[") and key.endswith("]"):
+            candidate = key[len("filter["):-1]
+            if candidate not in reserved and "][" not in candidate:
+                attribute = candidate
+        if attribute and attribute not in reserved:
+            current = attributes.get(attribute)
+            if current is None:
+                attributes[attribute] = value
+            elif isinstance(current, list):
+                current.append(value)
+            else:
+                attributes[attribute] = [current, value]
     return attributes
 
 

@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from src.database import Base, engine
+from src.models.cart_unavailability import CartUnavailability  # registers metadata table before create_all
 from src.exceptions import register_exception_handlers
 from src.api import catalog, product_card, similar_products, categories, favorites, subscriptions, cart, banners, collections, orders, order_cancel, events
 
