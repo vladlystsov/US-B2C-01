@@ -37,7 +37,13 @@ def _raise_cart_error(result: dict) -> None:
     code = result.get("error")
     if not code:
         return
-    status_code = 502 if code == "B2B_UNAVAILABLE" else 404 if code == "NOT_FOUND" else 409
+    status_code = {
+        "B2B_UNAVAILABLE": 502,
+        "NOT_FOUND": 404,
+        "SKU_NOT_FOUND": 404,
+        "SKU_UNAVAILABLE": 404,
+        "INSUFFICIENT_STOCK": 409,
+    }.get(code, 409)
     if code == "MISSING_IDENTITY":
         status_code = 400
     raise HTTPException(status_code=status_code, detail={"code": result["code"], "message": result["message"]})

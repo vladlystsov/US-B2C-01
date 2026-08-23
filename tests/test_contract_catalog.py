@@ -38,11 +38,25 @@ def test_catalog_returns_filtered_sorted_products(client, monkeypatch):
     }
 
 
-def test_invalid_sort_and_short_q_return_contract_error(client):
-    for query in ("?sort=rating", "?q=ab"):
-        response = client.get(f"/api/v1/catalog/products{query}")
-        assert response.status_code == 400
-        assert set(response.json()) == {"code", "message"}
+def test_invalid_sort_returns_400(client):
+    response = client.get("/api/v1/catalog/products?sort=rating")
+    assert response.status_code == 400
+    assert set(response.json()) == {"code", "message"}
+
+
+def test_short_q_returns_contract_error(client):
+    response = client.get("/api/v1/catalog/products?q=ab")
+    assert response.status_code == 400
+    assert set(response.json()) == {"code", "message"}
+
+
+def test_b2b_unavailable_returns_502(client, monkeypatch):
+    monkeypatch.setattr(b2b_client, "get_products", lambda **_kwargs: (_ for _ in ()).throw(RuntimeError()))
+
+    response = client.get("/api/v1/catalog/products")
+
+    assert response.status_code == 502
+    assert response.json() == {"code": "BAD_GATEWAY", "message": "B2B service unavailable"}
 
 
 def test_product_card_excludes_seller_only_sku_fields(client, monkeypatch):
