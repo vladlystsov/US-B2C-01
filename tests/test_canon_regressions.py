@@ -328,6 +328,34 @@ def test_facets_count_a_duplicate_characteristic_once_per_product(client, monkey
     assert response.json()["facets"] == [{"name": "brand", "values": [{"value": "Neo", "count": 1}]}]
 
 
+def test_facets_return_sku_level_characteristics(client, monkeypatch):
+    monkeypatch.setattr(
+        b2b_client,
+        "get_products",
+        lambda **_kwargs: {"items": [{"id": PRODUCT_ID}], "total_count": 1, "limit": 100, "offset": 0},
+    )
+    monkeypatch.setattr(
+        b2b_client,
+        "get_products_batch",
+        lambda _ids: [{
+            "id": PRODUCT_ID,
+            "characteristics": [{"name": "brand", "value": "Neo"}],
+            "skus": [
+                {"characteristics": [{"name": "color", "value": "Black"}]},
+                {"characteristics": [{"name": "color", "value": "Black"}]},
+            ],
+        }],
+    )
+
+    response = client.get("/api/v1/catalog/facets")
+
+    assert response.status_code == 200
+    assert response.json()["facets"] == [
+        {"name": "brand", "values": [{"value": "Neo", "count": 1}]},
+        {"name": "color", "values": [{"value": "Black", "count": 1}]},
+    ]
+
+
 def test_add_unknown_sku_returns_404_sku_not_found(client, db_session, monkeypatch):
     request = httpx.Request("GET", f"http://b2b/api/v1/public/skus/{SKU_ID}")
     response = httpx.Response(404, request=request, json={"code": "SKU_NOT_FOUND", "message": "SKU not found"})
