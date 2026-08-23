@@ -72,17 +72,19 @@ class CatalogService:
         product_ids = [str(item["id"]) for item in short_items if item.get("id")]
         # Public list отвечает ProductPublicShortResponse. Характеристики для
         # фасетов находятся только в ProductPublicResponse batch-контракта.
-        products = b2b_client.get_products_batch(product_ids) if product_ids else []
+        products = b2b_client.get_products_batch_chunked(product_ids) if product_ids else []
         counts: dict[str, dict[str, int]] = {}
         for item in products:
+            product_values: set[tuple[str, str]] = set()
             characteristics = item.get("characteristics", []) or item.get("attributes", [])
             for characteristic in characteristics:
                 name = characteristic.get("name") or characteristic.get("slug")
                 value = characteristic.get("value")
                 if not name or value is None:
                     continue
-                value = str(value)
-                values = counts.setdefault(str(name), {})
+                product_values.add((str(name), str(value)))
+            for name, value in product_values:
+                values = counts.setdefault(name, {})
                 values[value] = values.get(value, 0) + 1
         return {
             "category_id": category_id,

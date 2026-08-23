@@ -6,6 +6,8 @@ from src.config import settings
 
 
 class B2BClient:
+    PUBLIC_BATCH_LIMIT = 100
+
     def __init__(self):
         self.base_url = settings.B2B_SERVICE_URL
         self.headers = {"X-Service-Key": settings.B2C_TO_B2B_KEY}
@@ -72,6 +74,14 @@ class B2BClient:
             response.raise_for_status()
             data = response.json()
             return data if isinstance(data, list) else data.get("items", [])
+
+    def get_products_batch_chunked(self, product_ids: list[str]) -> list[dict]:
+        """Fetch public products without exceeding B2B's batch contract limit."""
+        unique_ids = list(dict.fromkeys(str(product_id) for product_id in product_ids))
+        products: list[dict] = []
+        for start in range(0, len(unique_ids), self.PUBLIC_BATCH_LIMIT):
+            products.extend(self.get_products_batch(unique_ids[start:start + self.PUBLIC_BATCH_LIMIT]))
+        return products
 
     def get_product_by_id(self, product_id: str) -> dict:
         with httpx.Client() as client:

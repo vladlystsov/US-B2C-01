@@ -42,7 +42,13 @@ class CartService:
             sku = b2b_client.get_public_sku(sku_id)
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
-                return self._sku_error("SKU_UNAVAILABLE", "SKU is unavailable")
+                try:
+                    upstream_code = exc.response.json().get("code")
+                except ValueError:
+                    upstream_code = None
+                if upstream_code in {"SKU_UNAVAILABLE", "PRODUCT_NOT_FOUND", "PRODUCT_UNAVAILABLE"}:
+                    return self._sku_error("SKU_UNAVAILABLE", "SKU is unavailable")
+                return self._sku_error("SKU_NOT_FOUND", "SKU not found")
             return self._sku_error("B2B_UNAVAILABLE", "B2B service unavailable")
         except Exception:
             return self._sku_error("B2B_UNAVAILABLE", "B2B service unavailable")
@@ -51,7 +57,7 @@ class CartService:
         if available_quantity is None:
             return self._sku_error("SKU_UNAVAILABLE", "SKU is unavailable")
         if available_quantity < requested_quantity:
-            return self._sku_error("SKU_UNAVAILABLE", "Requested quantity is unavailable")
+            return self._sku_error("INSUFFICIENT_STOCK", "Requested quantity exceeds available stock")
         product_id = sku.get("product_id")
         if not product_id:
             return self._sku_error("SKU_UNAVAILABLE", "SKU has no public product")
