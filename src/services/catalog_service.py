@@ -76,7 +76,9 @@ class CatalogService:
         counts: dict[str, dict[str, int]] = {}
         for item in products:
             product_values: set[tuple[str, str]] = set()
-            characteristics = item.get("characteristics", []) or item.get("attributes", [])
+            characteristics = list(item.get("characteristics", []) or item.get("attributes", []))
+            for sku in item.get("skus", []) or []:
+                characteristics.extend(sku.get("characteristics", []) or sku.get("attributes", []))
             for characteristic in characteristics:
                 name = characteristic.get("name") or characteristic.get("slug")
                 value = characteristic.get("value")
