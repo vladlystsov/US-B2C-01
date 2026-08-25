@@ -1,7 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
-from jose import jwt
+from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from src.config import settings
@@ -13,15 +13,17 @@ router = APIRouter(prefix="/api/v1/cart", tags=["Cart"])
 
 
 def get_identity(x_session_id: Optional[str] = Header(None), authorization: Optional[str] = Header(None)):
-    user_id = None
-    if authorization and authorization.startswith("Bearer "):
+    if authorization:
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid authorization scheme"})
         try:
             user_id = jwt.decode(
                 authorization.split(" ", 1)[1], settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
             ).get("sub")
-        except Exception:
-            pass
-    if user_id:
+        except (JWTError, IndexError):
+            raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid or expired token"})
+        if not user_id:
+            raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Invalid token subject"})
         return {"user_id": user_id, "session_id": None}
     if x_session_id:
         return {"user_id": None, "session_id": x_session_id}
@@ -86,12 +88,16 @@ def clear_cart(identity: dict = Depends(get_identity), db: Session = Depends(get
     return Response(status_code=204)
 
 
+def require_authenticated_user_id(authorization: Optional[str] = Header(None)) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Authorization is required"})
+    return get_identity(authorization=authorization)["user_id"]
+
+
 @router.post("/merge", response_model=CartResponse)
 def merge_cart(
     x_session_id: str = Header(...),
-    user_id: str = Depends(lambda authorization=Header(None): get_identity(None, authorization)["user_id"]),
+    user_id: str = Depends(require_authenticated_user_id),
     db: Session = Depends(get_db),
 ):
-    if not user_id:
-        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Authorization is required"})
     return CartService(db).merge_guest_cart(user_id=user_id, session_id=x_session_id)
