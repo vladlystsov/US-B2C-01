@@ -1,4 +1,5 @@
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from jose import JWTError, jwt
@@ -58,26 +59,26 @@ def validate_cart(identity: dict = Depends(get_identity), db: Session = Depends(
 
 @router.post("/items", response_model=CartResponse)
 def add_to_cart(request: AddToCartRequest, identity: dict = Depends(get_identity), db: Session = Depends(get_db)):
-    result = CartService(db).add_item(request.sku_id, request.quantity, **identity)
+    result = CartService(db).add_item(str(request.sku_id), request.quantity, **identity)
     _raise_cart_error(result)
     return result
 
 
 @router.patch("/items/{sku_id}", response_model=CartResponse)
 def update_cart_item(
-    sku_id: str,
+    sku_id: UUID,
     request: UpdateCartItemRequest,
     identity: dict = Depends(get_identity),
     db: Session = Depends(get_db),
 ):
-    result = CartService(db).update_item(sku_id, request.quantity, **identity)
+    result = CartService(db).update_item(str(sku_id), request.quantity, **identity)
     _raise_cart_error(result)
     return result
 
 
 @router.delete("/items/{sku_id}", response_model=CartResponse)
-def remove_from_cart(sku_id: str, identity: dict = Depends(get_identity), db: Session = Depends(get_db)):
-    result = CartService(db).remove_item(sku_id, **identity)
+def remove_from_cart(sku_id: UUID, identity: dict = Depends(get_identity), db: Session = Depends(get_db)):
+    result = CartService(db).remove_item(str(sku_id), **identity)
     _raise_cart_error(result)
     return result
 

@@ -15,7 +15,8 @@ def register_exception_handlers(app: FastAPI):
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_error_handler(request: Request, exc: RequestValidationError):
-        return JSONResponse(status_code=422, content={"code": "VALIDATION_ERROR", "message": str(exc.errors())})
+        status_code = 400 if request.url.path.startswith("/api/v1/cart") else 422
+        return JSONResponse(status_code=status_code, content={"code": "VALIDATION_ERROR", "message": str(exc.errors())})
 
     @app.exception_handler(ValidationError)
     async def validation_error_handler(request: Request, exc: ValidationError):

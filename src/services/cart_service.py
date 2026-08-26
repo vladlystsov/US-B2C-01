@@ -261,8 +261,6 @@ class CartService:
         """Return checkout readiness and per-SKU issues from current B2B data."""
         cart = self.get_cart(user_id=user_id, session_id=session_id)
         issues: list[dict] = []
-        if not cart["items"]:
-            issues.append({"sku_id": "", "type": "OUT_OF_STOCK", "message": "Cart is empty"})
         for item in cart["items"]:
             if not item["is_available"]:
                 issues.append(
