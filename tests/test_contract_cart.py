@@ -79,3 +79,47 @@ def test_banners_and_collections_use_catalog_paths_and_plain_arrays(client, db_s
     assert banners.status_code == 200 and isinstance(banners.json(), list) and banners.json()[0]["ordering"] == 1
     assert collections.status_code == 200 and collections.json()[0]["name"] == "Weekly"
     assert collections.json()[0]["products"][0]["min_price"] == 5000
+
+
+
+def test_cart_add_invalid_body_uses_contract_400(client):
+    session = "00000000-0000-0000-0000-000000000901"
+    invalid_quantity = client.post(
+        "/api/v1/cart/items",
+        headers={"X-Session-Id": session},
+        json={"sku_id": SKU_ID, "quantity": 0},
+    )
+    missing_quantity = client.post(
+        "/api/v1/cart/items",
+        headers={"X-Session-Id": session},
+        json={"sku_id": SKU_ID},
+    )
+    invalid_sku = client.post(
+        "/api/v1/cart/items",
+        headers={"X-Session-Id": session},
+        json={"sku_id": "not-a-uuid", "quantity": 1},
+    )
+    assert invalid_quantity.status_code == 400
+    assert missing_quantity.status_code == 400
+    assert invalid_sku.status_code == 400
+    assert all(response.json()["code"] == "VALIDATION_ERROR" for response in (invalid_quantity, missing_quantity, invalid_sku))
+
+
+def test_cart_validate_empty_uses_uuid_issue_schema(client):
+    session = "00000000-0000-0000-0000-000000000902"
+    response = client.post("/api/v1/cart/validate", headers={"X-Session-Id": session})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["is_valid"] is True
+    assert payload["issues"] == []
+    assert payload["cart"]["items"] == []
+
+
+def test_cart_path_sku_id_validation_uses_contract_400(client):
+    response = client.patch(
+        "/api/v1/cart/items/not-a-uuid",
+        headers={"X-Session-Id": "00000000-0000-0000-0000-000000000903"},
+        json={"quantity": 1},
+    )
+    assert response.status_code == 400
+    assert response.json()["code"] == "VALIDATION_ERROR"

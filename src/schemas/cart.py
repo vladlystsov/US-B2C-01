@@ -1,12 +1,13 @@
 from typing import Optional
 
 from pydantic import BaseModel, Field
+from uuid import UUID
 
 from src.schemas.catalog import ImageRef
 
 
 class AddToCartRequest(BaseModel):
-    sku_id: str
+    sku_id: UUID
     quantity: int = Field(..., ge=1)
 
 
@@ -38,7 +39,7 @@ class CartResponse(BaseModel):
 
 
 class CartValidationIssue(BaseModel):
-    sku_id: str
+    sku_id: UUID
     type: str
     message: str
 
